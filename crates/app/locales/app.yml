@@ -425,8 +425,11 @@ settings.browser_registered:
   en: Connected
   ja: 連携済み
 settings.browser_elsewhere:
-  en: "Connected to another copy of the app: %{path}"
-  ja: "別の場所のアプリと連携しています: %{path}"
+  en: "Connected to a copy of the app elsewhere:"
+  ja: "別の場所のアプリと連携しています:"
+settings.browser_reconnect:
+  en: Connect this copy
+  ja: このアプリと連携する
 settings.browser_no_host:
   en: The browser host (plamo-translate-host) is not next to the app
   ja: ブラウザ用のホスト（plamo-translate-host）がアプリと同じフォルダにありません

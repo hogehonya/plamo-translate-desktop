@@ -116,17 +116,18 @@ fn browser_settings(
             t!("settings.browser_not_registered").into_owned()
         }
         (browser::Registration::Registered, _) => t!("settings.browser_registered").into_owned(),
-        (browser::Registration::Elsewhere(path), _) => t!(
-            "settings.browser_elsewhere",
-            path = path.display().to_string()
-        )
-        .into_owned(),
+        (browser::Registration::Elsewhere(_), _) => t!("settings.browser_elsewhere").into_owned(),
+    };
+    // A long path goes on its own line, so it cannot push the buttons out of the dialog.
+    let elsewhere = match &registration {
+        browser::Registration::Elsewhere(path) => Some(path.display().to_string()),
+        _ => None,
     };
     let registered = registration == browser::Registration::Registered;
-    let action = if registered {
-        t!("settings.browser_unregister")
-    } else {
-        t!("settings.browser_register")
+    let action = match registration {
+        browser::Registration::Registered => t!("settings.browser_unregister"),
+        browser::Registration::Elsewhere(_) => t!("settings.browser_reconnect"),
+        browser::Registration::NotRegistered => t!("settings.browser_register"),
     };
     let toggle = {
         let view = view.clone();
@@ -153,11 +154,23 @@ fn browser_settings(
             h_flex()
                 .gap_3()
                 .text_sm()
-                .child(div().w(px(140.)).child(t!("settings.browser").into_owned()))
-                .child(div().flex_1().child(status))
-                .child(toggle)
-                .children(open_folder),
+                .child(
+                    div()
+                        .w(px(140.))
+                        .flex_none()
+                        .child(t!("settings.browser").into_owned()),
+                )
+                .child(div().flex_1().min_w_0().child(status))
+                .child(div().flex_none().child(toggle))
+                .children(open_folder.map(|button| div().flex_none().child(button))),
         )
+        .children(elsewhere.map(|path| {
+            div()
+                .text_xs()
+                .text_color(muted)
+                .min_w_0()
+                .child(path)
+        }))
         .children(error.map(|e| {
             div()
                 .text_xs()
