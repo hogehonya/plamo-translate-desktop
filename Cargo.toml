@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+
+[workspace.dependencies]
+pfml = { path = "crates/pfml" }
+engine = { path = "crates/engine" }
+
+anyhow = "1"
+thiserror = "2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Pinned to llama-cpp-rs main: the latest crates.io release (0.1.161) vendors llama.cpp 0.6.0,
+# which lacks the `plamo3` tokenizer used by the PLaMo 3 Translate GGUF files.
+# Switch back to a crates.io release once one ships llama.cpp >= 0.8.0.
+llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "0364f5da1c6a6ee37f507031f116ce4a09b28594", default-features = false }

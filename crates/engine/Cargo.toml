@@ -1,0 +1,25 @@
+[package]
+name = "engine"
+description = "Translation engine for PLaMo Translate Desktop (llama.cpp backend, models, downloads)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = ["openmp"]
+openmp = ["llama-cpp-2/openmp"]
+vulkan = ["llama-cpp-2/vulkan"]
+cuda = ["llama-cpp-2/cuda"]
+rocm = ["llama-cpp-2/rocm"]
+# Build ggml backends as loadable modules placed next to the executable.
+dynamic-backends = ["llama-cpp-2/dynamic-backends"]
+
+[dependencies]
+pfml.workspace = true
+llama-cpp-2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+tracing-subscriber.workspace = true
