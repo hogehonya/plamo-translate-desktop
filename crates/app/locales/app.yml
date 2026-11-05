@@ -75,6 +75,64 @@ status.error:
 status.model_missing:
   en: "Model file not found: %{path}"
   ja: "モデルファイルが見つかりません: %{path}"
+status.no_model:
+  en: No model selected. Download one from Models.
+  ja: モデルが選択されていません。「モデル」からダウンロードしてください。
+
+models.title:
+  en: Models
+  ja: モデル
+models.none:
+  en: No model
+  ja: モデル未選択
+models.license_notice:
+  en: "PLaMo 3 Translate models are provided by Preferred Networks under the PLaMo Community License. Personal and non-commercial use is free. Commercial use requires registration (or a separate agreement above ¥1B annual revenue)."
+  ja: "PLaMo 3 Translate のモデルは、Preferred Networks により PLaMo コミュニティライセンスで提供されています。個人・非商用での利用は無料です。商用利用には事前登録が必要です（年間売上 10 億円超の場合は別途契約）。"
+models.license_agree:
+  en: I agree to the PLaMo Community License
+  ja: PLaMo コミュニティライセンスに同意する
+models.license_link:
+  en: Read the license
+  ja: ライセンスを読む
+models.recommended:
+  en: Recommended
+  ja: おすすめ
+models.downloaded:
+  en: Downloaded
+  ja: ダウンロード済み
+models.in_use:
+  en: In use
+  ja: 使用中
+models.paused:
+  en: "Paused at %{percent}%"
+  ja: "%{percent}% で中断"
+models.failed:
+  en: "Failed: %{message}"
+  ja: "失敗: %{message}"
+models.download:
+  en: Download
+  ja: ダウンロード
+models.resume:
+  en: Resume
+  ja: 再開
+models.retry:
+  en: Retry
+  ja: 再試行
+models.cancel:
+  en: Cancel
+  ja: キャンセル
+models.use:
+  en: Use
+  ja: 使う
+models.delete:
+  en: Delete
+  ja: 削除
+models.folder:
+  en: "Models folder: %{path}"
+  ja: "保存先: %{path}"
+models.open_folder:
+  en: Open
+  ja: 開く
 
 lang.ja:
   en: Japanese

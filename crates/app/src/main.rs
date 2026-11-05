@@ -1,11 +1,13 @@
 //! PLaMo Translate Desktop.
 //!
-//! The model path comes from the first argument, then `PLAMO_MODEL`, then the default models
-//! directory. (Model selection and downloads arrive in M2.)
+//! Models are picked and downloaded in the app. A GGUF path given as the first argument or in
+//! `PLAMO_MODEL` overrides the saved selection, which is handy for development.
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod lang;
+mod models;
+mod settings;
 mod view;
 
 use std::path::PathBuf;
@@ -17,17 +19,11 @@ use crate::view::TranslatorView;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-const DEFAULT_MODEL: &str = "plamo-3-translate-2b-Q4_K_M.gguf";
-
-fn model_path() -> Option<PathBuf> {
+fn custom_model() -> Option<PathBuf> {
     std::env::args_os()
         .nth(1)
         .or_else(|| std::env::var_os("PLAMO_MODEL"))
         .map(PathBuf::from)
-        .or_else(|| {
-            directories::ProjectDirs::from("", "", "plamo-translate-desktop")
-                .map(|dirs| dirs.data_local_dir().join("models").join(DEFAULT_MODEL))
-        })
 }
 
 /// UI language: `PLAMO_LANG` if set, else the OS locale. Only `en` and `ja` are translated.
@@ -45,10 +41,8 @@ fn ui_locale() -> &'static str {
 }
 
 fn main() {
-    let Some(model) = model_path() else {
-        eprintln!("cannot determine the model path; pass it as the first argument");
-        std::process::exit(2);
-    };
+    let custom_model = custom_model();
+    let settings = settings::Settings::load();
     // Shared with gpui-component, so its built-in strings follow the same locale.
     rust_i18n::set_locale(ui_locale());
 
@@ -66,7 +60,7 @@ fn main() {
         };
         gpui_kit::open_window(options, cx, |window, cx| {
             Theme::sync_system_appearance(Some(window), cx);
-            cx.new(|cx| TranslatorView::new(model, window, cx))
+            cx.new(|cx| TranslatorView::new(custom_model, settings, window, cx))
         })
         .expect("failed to open the main window");
         cx.activate(true);

@@ -3,7 +3,9 @@
 //! The engine is GUI-agnostic. [`llama`] runs PLaMo 3 Translate GGUF models in-process with
 //! llama.cpp.
 
+pub mod download;
 pub mod llama;
+pub mod models;
 mod utf8;
 pub mod worker;
 

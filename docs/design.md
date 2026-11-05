@@ -153,22 +153,29 @@ The first implementation is `LlamaCppBackend`:
 
 ## 7. Model management
 
-- A built-in catalog covers every size × quantization from §2: repo, file name, size, and SHA-256.
-  When the app is online it can refresh the catalog from `https://huggingface.co/api/models/<repo>/tree/main`.
-- Download: `GET https://huggingface.co/<repo>/resolve/<revision>/<file>` into `<file>.part`.
-  - An interrupted download resumes with an HTTP `Range` request.
-  - Each file is verified with SHA-256 before it is renamed into place.
-  - Downloads can be cancelled.
-  - Progress reports bytes, rate, and ETA.
+- A built-in catalog (`engine::models::CATALOG`) lists all 14 GGUF files: repo, pinned commit, file name, size, and SHA-256.
+  - The download URL uses the pinned commit, so it always serves the file whose digest we ship.
+  - A new upstream release means updating the catalog.
+- Download (`engine::download`): `GET https://huggingface.co/<repo>/resolve/<revision>/<file>` into `<file>.part`. It uses `ureq` on its own thread.
+  - Hugging Face redirects to a CDN that honours `Range`, so an interrupted or cancelled download resumes from the partial file.
+  - The existing part is hashed first, so the digest always covers the whole file.
+  - The file is renamed into place only after the SHA-256 matches, so a final file of the right size counts as downloaded.
+  - Progress reports bytes, a smoothed rate, and ETA, throttled to 10 Hz.
 - Storage:
   - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data\models`
   - Linux: `$XDG_DATA_HOME/plamo-translate-desktop/models` (usually `~/.local/share/...`)
   - Both come from `directories::ProjectDirs::data_local_dir()`.
-  - The location can be changed in settings, and any local `.gguf` file can be used.
-- First run:
-  - The app proposes a model from the detected hardware. A GPU with at least 8 GB free gets 8B Q4_K_M,
-    otherwise 2B Q4_K_M, and less than 4 GB of RAM gets 0.8B.
-  - It shows the license and downloads the chosen model with progress.
+  - A GGUF path given on the command line or in `PLAMO_MODEL` overrides the selection (for development).
+- The Models dialog opens from the model button in the title bar. Each row shows its state and actions:
+  - Not downloaded: Download.
+  - Downloading: a progress bar and Cancel.
+  - Paused: Resume and Delete.
+  - Downloaded: Use and Delete. The active model cannot be deleted.
+  - Downloads stay disabled until the user accepts the PLaMo Community License. The acceptance is saved in settings.
+- Startup picks the first available of: the saved selection if downloaded, 2B Q4_K_M if downloaded, any downloaded model.
+  With no model, the Models dialog opens and the first finished download becomes active automatically.
+- The model marked "Recommended" is 2B Q4_K_M until M3 provides device memory.
+  `engine::models::recommend` then picks the largest Q4_K_M up to 8B whose file is at most 2/3 of the available memory.
 
 ## 8. Backend selection
 
@@ -222,7 +229,7 @@ Future idea: a global hotkey that translates the clipboard (with the `global-hot
 
 ## 10. Settings
 
-The app saves `settings.json` in the platform config directory. It holds UI language, theme, the selected model,
+The app saves `settings.json` in the platform config directory (M2 stores the selected model and the license acceptance). The full set is UI language, theme, the selected model,
 the backend (device, GPU layers, `n_ctx`, threads), the last language pair, the translation options, glossaries,
 the auto-translate flag, the window geometry, and the license acceptance record.
 

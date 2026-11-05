@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use engine::StopReason;
 use engine::llama::{ModelOptions, RuntimeOptions, SessionOptions};
+use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use engine::pfml::{LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
 use gpui_kit::assets::IconName as Lucide;
@@ -16,13 +17,15 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IconName, IndexPath, Sizable as _, StyledExt as _,
-    TitleBar, h_flex, v_flex,
+    TitleBar, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
+use crate::models::{ModelsEvent, ModelsPanel};
+use crate::settings::{self, Settings};
 
 actions!(translator, [CopyTranslation]);
 
@@ -58,7 +61,25 @@ struct Request {
     text: String,
 }
 
+/// The model to run.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelChoice {
+    Catalog(&'static CatalogEntry),
+    /// A GGUF file given on the command line.
+    Custom(PathBuf),
+}
+
+impl ModelChoice {
+    fn label(&self) -> String {
+        match self {
+            Self::Catalog(entry) => entry.to_string(),
+            Self::Custom(path) => model_label(path),
+        }
+    }
+}
+
 enum Status {
+    NoModel,
     Loading(f32),
     Ready,
     Translating { target: &'static str },
@@ -80,8 +101,10 @@ pub struct TranslatorView {
     auto_translate: bool,
 
     worker: Worker,
+    models: Entity<ModelsPanel>,
+    settings: Settings,
+    active_model: Option<ModelChoice>,
     model_ready: bool,
-    model_label: SharedString,
     status: Status,
     /// The job whose output is streaming into the output pane.
     current_job: Option<JobId>,
@@ -100,7 +123,13 @@ pub struct TranslatorView {
 }
 
 impl TranslatorView {
-    pub fn new(model_path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `custom_model` (from the command line) takes precedence over the saved selection.
+    pub fn new(
+        custom_model: Option<PathBuf>,
+        settings: Settings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let source = cx.new(|cx| {
             TextareaState::new(window, cx).placeholder(t!("source.placeholder").into_owned())
         });
@@ -129,8 +158,19 @@ impl TranslatorView {
             cx.new(|cx| SelectState::new(choices, selected, window, cx))
         };
 
+        let store = ModelStore::new(settings::models_dir());
+        let models = cx.new(|cx| {
+            ModelsPanel::new(
+                store.clone(),
+                catalog::default_entry(),
+                settings.license_accepted,
+                cx,
+            )
+        });
+
         let subscriptions = vec![
             cx.subscribe_in(&source, window, Self::on_source_event),
+            cx.subscribe_in(&models, window, Self::on_models_event),
             cx.subscribe_in(&source_select, window, |this, _, event, window, cx| {
                 if let SelectEvent::Confirm(Some(choice)) = event {
                     this.source_choice = *choice;
@@ -155,22 +195,6 @@ impl TranslatorView {
         let worker = Worker::spawn(RuntimeOptions::default(), move |event| {
             let _ = tx.send_blocking(event);
         });
-        let status = if model_path.is_file() {
-            worker.load(LoadRequest {
-                path: model_path.clone(),
-                model: ModelOptions::default(),
-                session: SessionOptions::default(),
-            });
-            Status::Loading(0.0)
-        } else {
-            Status::Error(
-                t!(
-                    "status.model_missing",
-                    path = model_path.display().to_string()
-                )
-                .into_owned(),
-            )
-        };
         let events = cx.spawn_in(window, async move |this, cx| {
             while let Ok(event) = rx.recv().await {
                 if this
@@ -186,7 +210,22 @@ impl TranslatorView {
 
         source.update(cx, |state, cx| state.focus(window, cx));
 
-        Self {
+        let initial = match custom_model {
+            Some(path) => Some(ModelChoice::Custom(path)),
+            None => {
+                let downloaded = |e: &&CatalogEntry| store.state(e) == LocalState::Downloaded;
+                settings
+                    .model
+                    .as_deref()
+                    .and_then(catalog::find_entry)
+                    .filter(downloaded)
+                    .or_else(|| Some(catalog::default_entry()).filter(downloaded))
+                    .or_else(|| catalog::CATALOG.iter().find(downloaded))
+                    .map(ModelChoice::Catalog)
+            }
+        };
+
+        let mut this = Self {
             source,
             output,
             source_select,
@@ -197,9 +236,11 @@ impl TranslatorView {
             style_choice,
             auto_translate: true,
             worker,
+            models,
+            settings,
+            active_model: None,
             model_ready: false,
-            model_label: model_label(&model_path).into(),
-            status,
+            status: Status::NoModel,
             current_job: None,
             shown: None,
             translation: String::new(),
@@ -210,7 +251,80 @@ impl TranslatorView {
             copied_reset: Task::ready(()),
             _subscriptions: subscriptions,
             _events: events,
+        };
+        match initial {
+            Some(choice) => this.load_model(choice, cx),
+            None => cx.defer_in(window, |this, window, cx| this.open_models(window, cx)),
         }
+        this
+    }
+
+    fn load_model(&mut self, choice: ModelChoice, cx: &mut Context<Self>) {
+        let path = match &choice {
+            ModelChoice::Catalog(entry) => self.models.read(cx).store().path(entry),
+            ModelChoice::Custom(path) => path.clone(),
+        };
+        self.current_job = None;
+        self.shown = None;
+        self.model_ready = false;
+        // Cached results belong to the previous model.
+        self.cache.clear();
+        if path.is_file() {
+            self.worker.load(LoadRequest {
+                path,
+                model: ModelOptions::default(),
+                session: SessionOptions::default(),
+            });
+            self.status = Status::Loading(0.0);
+        } else {
+            self.worker.unload();
+            self.status = Status::Error(
+                t!("status.model_missing", path = path.display().to_string()).into_owned(),
+            );
+        }
+        let entry = match &choice {
+            ModelChoice::Catalog(entry) => Some(*entry),
+            ModelChoice::Custom(_) => None,
+        };
+        self.models
+            .update(cx, |models, cx| models.set_active(entry, cx));
+        if let Some(entry) = entry {
+            self.settings.model = Some(entry.id().to_owned());
+            self.settings.save();
+        }
+        self.active_model = Some(choice);
+        cx.notify();
+    }
+
+    fn on_models_event(
+        &mut self,
+        _: &Entity<ModelsPanel>,
+        event: &ModelsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ModelsEvent::Use(entry) => {
+                self.load_model(ModelChoice::Catalog(entry), cx);
+                if window.has_active_dialog(cx) {
+                    window.close_dialog(cx);
+                }
+            }
+            ModelsEvent::LicenseAccepted => {
+                self.settings.license_accepted = true;
+                self.settings.save();
+            }
+        }
+    }
+
+    fn open_models(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = self.models.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog
+                .title(t!("models.title").into_owned())
+                .w(px(780.))
+                .child(panel.clone())
+        });
     }
 
     fn source_text(&self, cx: &App) -> String {
@@ -431,6 +545,7 @@ impl TranslatorView {
 
     fn status_text(&self) -> String {
         match &self.status {
+            Status::NoModel => t!("status.no_model").into_owned(),
             Status::Loading(p) => {
                 t!("status.loading", percent = format!("{:.0}", p * 100.0)).into_owned()
             }
@@ -456,6 +571,10 @@ impl Render for TranslatorView {
         let view = cx.entity().downgrade();
         let theme = cx.theme();
 
+        let model_button_label = self
+            .active_model
+            .as_ref()
+            .map_or_else(|| t!("models.none").into_owned(), ModelChoice::label);
         let title_bar = TitleBar::new().child(
             h_flex()
                 .gap_2()
@@ -466,13 +585,13 @@ impl Render for TranslatorView {
                         .child(t!("app.title").into_owned()),
                 )
                 .child(
-                    div()
-                        .px_2()
-                        .rounded_md()
-                        .bg(theme.secondary)
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(self.model_label.clone()),
+                    Button::new("models")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::HardDrive)
+                        .label(model_button_label)
+                        .tooltip(t!("models.title").into_owned())
+                        .on_click(cx.listener(|this, _, window, cx| this.open_models(window, cx))),
                 ),
         );
 
