@@ -1,5 +1,7 @@
 # PLaMo Translate Desktop
 
+[日本語](README.ja.md)
+
 A desktop translation app that runs [PLaMo 3 Translate](https://www.preferred.jp/ja/blog/tech/plamo-3-translate-weight-release)
 locally on your computer. It works offline once a model is downloaded. Written in Rust with [GPUI](https://www.gpui.rs/).
 
@@ -8,12 +10,15 @@ locally on your computer. It works offline once a model is downloaded. Written i
 ## Features
 
 - Translation between 53 languages. The default target is "Japanese ⇄ English (auto)".
-- Paste to translate; text you type is translated after a short pause. The translation streams in as it is generated.
+- Paste to translate; text you type is translated after a short pause. The translation streams in as it is generated, with the live speed in the status bar, and can be stopped at any time.
 - Japanese output style (polite or plain), a reference context, and a glossary (`source = target`, one term per line).
 - Long texts are split into paragraphs and translated in order, with earlier pairs passed as history to keep wording consistent.
-- Built-in model manager: choose a model size and quantization (0.8B, 2B, 8B or 31B GGUF). The download resumes after an interruption and is verified with SHA-256.
-- Runs on the CPU or on a GPU through Vulkan (Windows builds). The device and the context length are selectable.
-- English and Japanese UI. It follows the OS language by default and can be changed under Settings (the gear in the title bar). `PLAMO_LANG=ja` or `en` overrides both.
+- Built-in model manager: choose a model size and quantization (0.8B, 2B, 8B or 31B GGUF).
+  - Each file shows the translation quality PFN publishes, with the difference from the unquantized model.
+  - Downloads resume after an interruption and are verified with SHA-256.
+  - Newly published files are picked up from Hugging Face without an app update.
+- Runs on the CPU (AVX2 or AVX-512) or on a GPU through Vulkan. Linux source builds can also use ROCm. The device is selectable, and automatic selection picks the discrete GPU.
+- English and Japanese UI. It follows the OS language by default and can be changed under Settings (the gear in the status bar). `PLAMO_LANG=ja` or `en` overrides both.
 
 Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation.
 
@@ -94,6 +99,18 @@ cargo run -p engine --release --example download -- --list
 ```
 
 A GGUF path passed as the first argument (or in `PLAMO_MODEL`) overrides the model selected in the app.
+
+### Files and logs
+
+Models, the cached model list (`catalog.json`), and a small log (`app.log`) are kept in:
+
+- Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
+- Linux: `~/.local/share/plamo-translate-desktop` (`$XDG_DATA_HOME`)
+
+The log records start-up, detected devices, model loads, downloads, and deletions, but never translated text.
+A log larger than 1 MiB is moved to `app.log.1` at start-up.
+
+Settings are in `settings.json`: `%APPDATA%\plamo-translate-desktop\config` on Windows, and `~/.config/plamo-translate-desktop` (`$XDG_CONFIG_HOME`) on Linux.
 
 ## License
 
