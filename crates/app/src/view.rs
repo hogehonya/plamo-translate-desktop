@@ -13,7 +13,9 @@ use engine::pfml::{GlossaryEntry, LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::input::{
+    BufferPoint, DisplayPoint, InputEvent, RopeExt as _, Textarea, TextareaState,
+};
 use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
@@ -25,6 +27,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::align::{Alignment, ChunkSpan, Side};
 use crate::backend::{self, BackendEvent, BackendPanel};
 use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
@@ -48,6 +51,26 @@ const STREAM_FRAME: Duration = Duration::from_millis(50);
 const COPY_TRANSLATION_KEY: &str = "cmd-shift-c";
 #[cfg(not(target_os = "macos"))]
 const COPY_TRANSLATION_KEY: &str = "ctrl-shift-c";
+
+/// Byte offset of the start of the first line visible in `state`.
+fn top_offset(state: &TextareaState) -> Option<usize> {
+    let line_height = state.line_height()?;
+    let row = (-state.scroll_offset().y / line_height).max(0.0) as usize;
+    let point = state
+        .display_map()
+        .display_pos_to_buffer_pos(DisplayPoint::new(row, 0));
+    let text = state.text();
+    Some((text.line_start_offset(point.line) + point.col).min(text.len()))
+}
+
+/// The display row (after wrapping) of byte `offset` in `state`.
+fn display_row(state: &TextareaState, offset: usize) -> usize {
+    let point = state.text().offset_to_point(offset);
+    state
+        .display_map()
+        .buffer_pos_to_display_pos(BufferPoint::new(point.row, point.column))
+        .row
+}
 
 /// A duration for the status bar, such as `45 s`, `3 min 20 s`, or `1 h 05 min`.
 fn format_duration(d: Duration) -> String {
@@ -126,6 +149,26 @@ type StyleSelect = SelectState<Vec<Choice<StyleChoice>>>;
 type UiLanguageSelect = SelectState<Vec<Choice<UiLanguage>>>;
 type ThemeSelect = SelectState<Vec<Choice<ThemeSetting>>>;
 type TokensSelect = SelectState<Vec<Choice<usize>>>;
+
+/// A finished translation, kept to show it again without translating.
+struct Cached {
+    request: Request,
+    translation: String,
+    chunks: Vec<ChunkSpan>,
+}
+
+/// What synchronized scrolling last saw of each pane (indexed by `Side as usize`).
+#[derive(Default)]
+struct SyncState {
+    scroll_y: [Pixels; 2],
+    selection: [Range<usize>; 2],
+    /// When a pane was last scrolled to follow the other; its own changes are ignored briefly,
+    /// so the two do not chase each other.
+    followed_at: [Option<Instant>; 2],
+}
+
+/// How long a pane's changes are ignored after it was scrolled to follow the other.
+const FOLLOW_SETTLE: Duration = Duration::from_millis(150);
 
 /// The chunk of a long text being translated: its byte range in the source, and how many
 /// tokens had been generated when it started.
@@ -237,7 +280,16 @@ pub struct TranslatorView {
     translation_utf16: usize,
     /// Derived from the source text when it last changed, instead of on every frame.
     source_info: Option<SourceInfo>,
-    cache: VecDeque<(Request, String)>,
+    cache: VecDeque<Cached>,
+    /// Chunks of the shown translation, for synchronized scrolling.
+    chunks: Vec<ChunkSpan>,
+    /// The alignment of the shown translation, keyed by its length and chunk count.
+    alignment: Option<((usize, usize), Alignment)>,
+    /// Incremented when the source text changes; the alignment holds only while it matches
+    /// `shown_version`.
+    source_version: u64,
+    shown_version: u64,
+    sync: SyncState,
     /// Tokens received for the current job, and when the first one arrived (for the live rate).
     stream_tokens: usize,
     stream_started: Option<Instant>,
@@ -341,6 +393,13 @@ impl TranslatorView {
 
         let subscriptions = vec![
             cx.subscribe_in(&source, window, Self::on_source_event),
+            // Scrolling and caret moves notify the pane; the other pane may follow.
+            cx.observe_in(&source, window, |this, _, window, cx| {
+                this.on_pane_changed(Side::Source, window, cx)
+            }),
+            cx.observe_in(&output, window, |this, _, window, cx| {
+                this.on_pane_changed(Side::Output, window, cx)
+            }),
             cx.subscribe_in(&context_input, window, |this, input, event, window, cx| {
                 if let InputEvent::Change = event {
                     this.context = input.read(cx).value().to_string();
@@ -496,6 +555,11 @@ impl TranslatorView {
             translation_utf16: 0,
             source_info: None,
             cache: VecDeque::new(),
+            chunks: Vec::new(),
+            alignment: None,
+            source_version: 0,
+            shown_version: 0,
+            sync: SyncState::default(),
             stream_tokens: 0,
             stream_started: None,
             job_started: None,
@@ -507,6 +571,7 @@ impl TranslatorView {
             _subscriptions: subscriptions,
             _events: events,
         };
+        this.link_selection_focus(cx);
         let needs_model = initial.is_none();
         if let Some(choice) = initial {
             this.load_model(choice, cx);
@@ -740,7 +805,12 @@ impl TranslatorView {
         let chunk = self.chunk_select.clone();
         let history = self.history_select.clone();
         let muted = cx.theme().muted_foreground;
-        window.open_dialog(cx, move |dialog, _, _| {
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let sync_scroll = view
+                .upgrade()
+                .is_some_and(|view| view.read(cx).settings.sync_scroll);
+            let toggle_view = view.clone();
             let row = |label: &str, select: AnyElement| {
                 h_flex()
                     .gap_3()
@@ -770,6 +840,22 @@ impl TranslatorView {
                                 .text_xs()
                                 .text_color(muted)
                                 .child(t!("settings.document_note").into_owned()),
+                        )
+                        .child(
+                            Switch::new("sync-scroll")
+                                .checked(sync_scroll)
+                                .label(t!("settings.sync_scroll").into_owned())
+                                .on_click(move |checked: &bool, window, cx| {
+                                    let _ = toggle_view
+                                        .update(cx, |this, cx| this.set_sync_scroll(*checked, cx));
+                                    window.refresh();
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(t!("settings.sync_scroll_note").into_owned()),
                         ),
                 )
         });
@@ -896,6 +982,7 @@ impl TranslatorView {
         match event {
             InputEvent::Change => {
                 self.source_info = None;
+                self.source_version += 1;
                 if std::mem::take(&mut self.paste_pending) {
                     self.translate_now(window, cx);
                 } else if self.auto_translate {
@@ -972,12 +1059,14 @@ impl TranslatorView {
         if self.shown.as_ref() == Some(&request) {
             return;
         }
-        if let Some(hit) = self.cache.iter().find(|(r, _)| r == &request) {
-            let hit = hit.1.clone();
+        if let Some(hit) = self.cache.iter().find(|c| c.request == request) {
+            let (hit, chunks) = (hit.translation.clone(), hit.chunks.clone());
             self.worker.cancel();
             self.current_job = None;
             self.shown = Some(request);
+            self.shown_version = self.source_version;
             self.set_translation(hit, window, cx);
+            self.chunks = chunks;
             self.status = Status::Cached;
             cx.notify();
             return;
@@ -995,6 +1084,7 @@ impl TranslatorView {
         self.job_started = Some(Instant::now());
         self.current_chunk = None;
         self.shown = Some(request);
+        self.shown_version = self.source_version;
         self.status = Status::Translating {
             target,
             chunk: None,
@@ -1004,6 +1094,7 @@ impl TranslatorView {
 
     /// Replaces the output and scrolls it back to the top.
     fn set_translation(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.chunks.clear();
         self.translation_utf16 = text.encode_utf16().count();
         self.translation = text;
         let text = SharedString::from(self.translation.clone());
@@ -1173,6 +1264,10 @@ impl TranslatorView {
                     end,
                     tokens_before: self.stream_tokens,
                 });
+                self.chunks.push(ChunkSpan {
+                    source: start..end,
+                    output_start: self.translation.len(),
+                });
             }
             Event::Token { job, text } if is_current(job) => {
                 self.append_translation(&text, window, cx);
@@ -1200,7 +1295,11 @@ impl TranslatorView {
                 self.status = match stats.stop_reason {
                     StopReason::Finished => {
                         if let Some(request) = self.shown.clone() {
-                            self.remember(request, self.translation.clone());
+                            self.remember(Cached {
+                                request,
+                                translation: self.translation.clone(),
+                                chunks: self.chunks.clone(),
+                            });
                         }
                         Status::Done {
                             tokens: stats.generated_tokens,
@@ -1235,11 +1334,153 @@ impl TranslatorView {
         cx.notify();
     }
 
-    fn remember(&mut self, request: Request, translation: String) {
+    fn remember(&mut self, entry: Cached) {
         if self.cache.len() == CACHE_SIZE {
             self.cache.pop_front();
         }
-        self.cache.push_back((request, translation));
+        self.cache.push_back(entry);
+    }
+
+    fn pane(&self, side: Side) -> &Entity<TextareaState> {
+        match side {
+            Side::Source => &self.source,
+            Side::Output => &self.output,
+        }
+    }
+
+    /// The alignment of the shown translation with the source, while the source is the text
+    /// that was translated.
+    fn alignment(&mut self) -> Option<&Alignment> {
+        if self.source_version != self.shown_version || self.chunks.is_empty() {
+            return None;
+        }
+        let key = (self.translation.len(), self.chunks.len());
+        if self.alignment.as_ref().map(|(k, _)| *k) != Some(key) {
+            let source = &self.shown.as_ref()?.text;
+            let alignment = Alignment::new(source, &self.translation, &self.chunks);
+            self.alignment = Some((key, alignment));
+        }
+        self.alignment.as_ref().map(|(_, a)| a)
+    }
+
+    /// A pane notified a change: if the reader scrolled it or moved its caret, the other pane
+    /// follows.
+    fn on_pane_changed(&mut self, side: Side, window: &mut Window, cx: &mut Context<Self>) {
+        let (scroll_y, selection, focused) = {
+            let state = self.pane(side).read(cx);
+            (
+                state.scroll_offset().y,
+                state.selected_range(),
+                state.focus_handle(cx).is_focused(window),
+            )
+        };
+        let i = side as usize;
+        let scrolled = scroll_y != self.sync.scroll_y[i];
+        let moved = selection != self.sync.selection[i];
+        self.sync.scroll_y[i] = scroll_y;
+        self.sync.selection[i] = selection.clone();
+        let following = self.sync.followed_at[i].is_some_and(|t| t.elapsed() < FOLLOW_SETTLE);
+        if !self.settings.sync_scroll || following {
+            return;
+        }
+        if moved && focused {
+            self.follow_caret(side, selection.start, cx);
+        } else if scrolled {
+            self.follow_scroll(side, cx);
+        }
+    }
+
+    /// Scrolls the other pane so the counterpart of `side`'s first visible line is at its top.
+    fn follow_scroll(&mut self, side: Side, cx: &mut Context<Self>) {
+        let Some(top) = top_offset(self.pane(side).read(cx)) else {
+            return;
+        };
+        let other = side.other();
+        let Some(target) = self.map_offset(side, top) else {
+            return;
+        };
+        self.scroll_pane(other, target, px(0.), cx);
+    }
+
+    /// Selects the counterpart of the paragraph holding `side`'s caret in the other pane, and
+    /// scrolls it level with the caret.
+    fn follow_caret(&mut self, side: Side, offset: usize, cx: &mut Context<Self>) {
+        let other = side.other();
+        let Some(range) = self.alignment().and_then(|a| a.counterpart(side, offset)) else {
+            return;
+        };
+        let Some(target) = self.map_offset(side, offset) else {
+            return;
+        };
+        let caret_y = {
+            let state = self.pane(side).read(cx);
+            match state.line_height() {
+                Some(line_height) => {
+                    line_height * display_row(state, offset) as f32 + state.scroll_offset().y
+                }
+                None => px(0.),
+            }
+        };
+        self.pane(other)
+            .clone()
+            .update(cx, |state, cx| state.set_selected_range(range, cx));
+        self.scroll_pane(other, target, caret_y, cx);
+    }
+
+    /// The position in the other pane corresponding to `offset` in `side`.
+    fn map_offset(&mut self, side: Side, offset: usize) -> Option<usize> {
+        self.alignment()?;
+        let alignment = &self.alignment.as_ref()?.1;
+        let other_text = match side.other() {
+            Side::Source => self.shown.as_ref()?.text.as_str(),
+            Side::Output => self.translation.as_str(),
+        };
+        alignment.map(side, offset, other_text)
+    }
+
+    /// Scrolls `side` so that `offset` is `y` below the top of the pane.
+    fn scroll_pane(&mut self, side: Side, offset: usize, y: Pixels, cx: &mut Context<Self>) {
+        self.sync.followed_at[side as usize] = Some(Instant::now());
+        self.pane(side).clone().update(cx, |state, cx| {
+            let Some(line_height) = state.line_height() else {
+                return;
+            };
+            let row = display_row(state, offset.min(state.text().len()));
+            let mut scroll = state.scroll_offset();
+            scroll.y = y - line_height * row as f32;
+            if scroll.y > px(0.) {
+                scroll.y = px(0.);
+            }
+            state.set_scroll_offset(scroll, cx);
+        });
+    }
+
+    fn set_sync_scroll(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.settings.sync_scroll == enabled {
+            return;
+        }
+        self.settings.sync_scroll = enabled;
+        self.settings.save();
+        crate::app_log!(
+            "synchronized scrolling {}",
+            if enabled { "on" } else { "off" }
+        );
+        self.link_selection_focus(cx);
+        cx.notify();
+    }
+
+    /// While scrolling is synchronized, each pane keeps its selection (the counterpart of the
+    /// other pane's caret) visible while the other pane has focus.
+    fn link_selection_focus(&self, cx: &mut Context<Self>) {
+        let enabled = self.settings.sync_scroll;
+        let source_focus = self.source.read(cx).focus_handle(cx);
+        let output_focus = self.output.read(cx).focus_handle(cx);
+        self.source.update(cx, |state, cx| {
+            state.set_selection_focus(enabled.then_some(output_focus), cx)
+        });
+        self.output.update(cx, |state, cx| {
+            state.set_selection_focus(enabled.then_some(source_focus), cx)
+        });
     }
 
     fn can_swap(&self) -> bool {
@@ -1269,6 +1510,7 @@ impl TranslatorView {
             self.source
                 .update(cx, |state, cx| state.set_value(text, window, cx));
             self.source_info = None;
+            self.source_version += 1;
         }
         self.translate_now(window, cx);
         cx.notify();
@@ -1301,6 +1543,7 @@ impl TranslatorView {
             state.focus(window, cx);
         });
         self.source_info = None;
+        self.source_version += 1;
         self.translate_now(window, cx);
     }
 

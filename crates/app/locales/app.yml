@@ -406,6 +406,12 @@ settings.chunk:
 settings.history:
   en: History
   ja: 履歴の量
+settings.sync_scroll:
+  en: Scroll the source and the translation together
+  ja: 原文と訳文を連動してスクロール
+settings.sync_scroll_note:
+  en: "Scrolling one pane scrolls the other to the same place. Moving the caret in one pane selects the corresponding paragraph in the other."
+  ja: "片方をスクロールすると、もう片方も同じ箇所までスクロールします。片方でカーソルを動かすと、もう片方で対応する段落を選択します。"
 settings.tokens:
   en: "%{count} tokens"
   ja: "%{count} トークン"

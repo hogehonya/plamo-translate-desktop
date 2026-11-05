@@ -320,6 +320,13 @@ The first implementation is `LlamaCppBackend`:
 - Streaming keeps the output pane's scroll position, so a reader can scroll through a long translation while it grows.
   A new translation starts at the top.
 - Japanese IME input must work on both platforms. This is checked in M0.
+- Synchronized scrolling (Settings, on by default; `crates/app/src/align.rs`):
+  - Chunk starts are known pairs of source and output positions. Within a chunk, paragraphs (blank-line separated, or lines in text without blank lines)
+    are paired when both sides have the same number; otherwise the chunk is one segment. Positions inside a segment map proportionally.
+  - Scrolling a pane scrolls the other so the counterpart of its first visible line is at the top.
+    Moving the caret selects the counterpart paragraph in the other pane, level with the caret; each pane keeps its selection visible while the other has focus.
+  - A pane that was scrolled to follow ignores its own changes for 150 ms, so the two do not chase each other.
+  - It applies while the source is the text that was translated; cached results keep their chunks for it.
 - Theme: Settings → Theme (System, Light, or Dark). System follows the OS, including changes while the app runs.
   The light and dark themes come from gpui-kit.
 - UI strings live in `crates/app/locales/app.yml`. The language is the first that applies of:

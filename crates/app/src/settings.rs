@@ -36,7 +36,7 @@ fn settings_path() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("settings.json"))
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Catalog id of the selected model.
@@ -49,6 +49,23 @@ pub struct Settings {
     pub ui_language: UiLanguage,
     pub theme: ThemeSetting,
     pub document: DocumentSettings,
+    /// Scroll the source and the translation together, and show the counterpart of the caret.
+    pub sync_scroll: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            license_accepted: false,
+            backend: BackendSettings::default(),
+            glossary: String::new(),
+            ui_language: UiLanguage::default(),
+            theme: ThemeSetting::default(),
+            document: DocumentSettings::default(),
+            sync_scroll: true,
+        }
+    }
 }
 
 /// How long texts are split (see `engine::document`).
@@ -220,6 +237,7 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(s.theme, super::ThemeSetting::Dark);
         assert_eq!(s.document, super::DocumentSettings::default());
+        assert!(s.sync_scroll);
         let s: Settings = serde_json::from_str(r#"{"document":{"chunk_tokens":512}}"#).unwrap();
         assert_eq!(s.document.chunk_tokens, 512);
         assert_eq!(

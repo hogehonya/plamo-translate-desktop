@@ -21,6 +21,7 @@ locally on your computer. It works offline once a model is downloaded. Written i
 - Runs on the CPU (AVX2 or AVX-512) or on a GPU through Vulkan. Linux source builds can also use ROCm. The device is selectable, and automatic selection picks the discrete GPU.
 - English and Japanese UI. It follows the OS language by default and can be changed under Settings (the gear in the status bar). `PLAMO_LANG=ja` or `en` overrides both.
 - Light and dark themes. The default follows the OS; Settings can fix either one.
+- The source and the translation scroll together, and moving the caret in one selects the corresponding paragraph in the other (can be turned off in Settings).
 
 Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation.
 
