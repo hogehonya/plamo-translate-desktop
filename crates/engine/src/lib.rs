@@ -56,12 +56,19 @@ pub enum StopReason {
     Repetition { kept: usize },
     /// The output reached [`Generation::max_tokens`].
     LengthLimit,
+    /// Document translation only: the model ended a chunk with an output far shorter than its
+    /// source, having skipped the rest of it.
+    Incomplete,
 }
 
 impl StopReason {
-    /// Whether generation ran away: the output looped or grew far longer than the input.
+    /// Whether the output went wrong: it looped, grew far longer than the input, or ended far
+    /// too early.
     pub fn is_runaway(self) -> bool {
-        matches!(self, Self::Repetition { .. } | Self::LengthLimit)
+        matches!(
+            self,
+            Self::Repetition { .. } | Self::LengthLimit | Self::Incomplete
+        )
     }
 }
 

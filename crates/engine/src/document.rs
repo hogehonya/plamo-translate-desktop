@@ -73,6 +73,13 @@ fn max_output_tokens(source_tokens: usize) -> usize {
     3 * source_tokens + 128
 }
 
+/// Whether a finished translation is so much shorter than its source that the model must have
+/// ended early and skipped the rest. Large chunks did this silently; translations are rarely
+/// under half the source's length in tokens.
+fn looks_incomplete(source_tokens: usize, output_tokens: usize) -> bool {
+    source_tokens >= 200 && output_tokens * 4 < source_tokens
+}
+
 /// A piece of the source: text to translate, followed by whitespace to copy unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk<'a> {
@@ -394,8 +401,14 @@ impl Translator<'_> {
     /// Returns `Finished`, `Cancelled`, or `ContextFull`.
     fn chunk(&mut self, index: usize, text: &str) -> Result<StopReason> {
         let start = self.emitted;
-        let max_tokens = max_output_tokens((self.count_tokens)(text));
-        let (translation, reason) = self.generate(text, Generation::greedy(max_tokens))?;
+        let source_tokens = (self.count_tokens)(text);
+        let max_tokens = max_output_tokens(source_tokens);
+        let (translation, mut reason) = self.generate(text, Generation::greedy(max_tokens))?;
+        if reason == StopReason::Finished
+            && looks_incomplete(source_tokens, (self.count_tokens)(&translation))
+        {
+            reason = StopReason::Incomplete;
+        }
         if !reason.is_runaway() {
             if reason == StopReason::Finished {
                 self.remember(text, &translation);
@@ -454,8 +467,9 @@ impl Translator<'_> {
             StopReason::Cancelled | StopReason::ContextFull => return Ok(reason),
             // Keep the text up to the end of the cycle's first occurrence.
             StopReason::Repetition { kept } => self.truncate(start + kept),
-            // Keep the output, which ends wherever the limit cut it.
-            StopReason::LengthLimit => {}
+            // Keep the output, which ends wherever the limit cut it. (Backends never report
+            // Incomplete; only whole chunks are checked for it.)
+            StopReason::LengthLimit | StopReason::Incomplete => {}
         }
         self.total.cut += 1;
         (self.on_progress)(Progress::Cut { index, reason });
@@ -571,7 +585,8 @@ mod tests {
     }
 
     /// Uppercases its input and records the prompts it received. Inputs containing "LOOP" loop
-    /// when decoded greedily, and also with repetition penalized if `stubborn`.
+    /// when decoded greedily, and also with repetition penalized if `stubborn`. A multi-sentence
+    /// input containing "SHORT" is answered with just "A".
     struct Upper {
         prompts: Vec<String>,
         stubborn: bool,
@@ -598,6 +613,10 @@ mod tests {
             if prompt.text.contains("LOOP") && (self.stubborn || !generation.penalize_repetition) {
                 sink("la la la la");
                 return Ok(stats(StopReason::Repetition { kept: 3 }));
+            }
+            if prompt.text.contains("SHORT") && prompt.text.contains('b') {
+                sink("A");
+                return Ok(stats(StopReason::Finished));
             }
             sink(&prompt.text.to_uppercase());
             Ok(stats(StopReason::Finished))
@@ -685,6 +704,27 @@ mod tests {
         // Output that looped never becomes history.
         assert!(backend.prompts.iter().all(|p| !p.contains("la la")));
         assert!(backend.prompts[4].contains("<|plamo:msg|>BAD LOOP ONE."));
+    }
+
+    #[test]
+    fn retries_a_chunk_that_ended_early() {
+        let mut backend = Upper::new();
+        let text = format!("{} SHORT. {}.", "a".repeat(150), "b".repeat(100));
+        let (out, stats, progress) = run(&mut backend, &chars, DocumentOptions::default(), &text);
+        assert_eq!(out, text.to_uppercase());
+        assert_eq!((stats.retries, stats.cut), (1, 0));
+        assert_eq!(
+            progress[1],
+            Progress::Retry {
+                index: 0,
+                reason: StopReason::Incomplete,
+                pieces: 2
+            }
+        );
+        // A short source may well have a short translation.
+        assert!(!looks_incomplete(150, 10));
+        assert!(!looks_incomplete(400, 100));
+        assert!(looks_incomplete(400, 99));
     }
 
     #[test]

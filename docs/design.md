@@ -177,8 +177,10 @@ The first implementation is `LlamaCppBackend`:
     A loop is a span of at least 64 tokens that repeats its cycle at least three times.
     The threshold rises to twice the longest such span in the prompt, so input that repeats legitimately (rulers, refrains) can be translated.
   - The output of a chunk is also limited to 3 × its tokens + 128.
+  - A chunk of at least 200 tokens whose translation ends at under a quarter of its tokens counts as incomplete:
+    large chunks often ended early and silently skipped the rest. It is retried like a loop.
   - Recovery:
-    1. A chunk whose output runs away is withdrawn (`Output::Truncate`, `Event::Rewind`) and translated again sentence by sentence.
+    1. A chunk whose output runs away (or is incomplete) is withdrawn (`Output::Truncate`, `Event::Rewind`) and translated again sentence by sentence.
     2. A sentence that runs away again is retried with llama.cpp's DRY sampler (multiplier 0.8, base 1.75, allowed length 2), which penalizes the output repeating itself.
        DRY is not used otherwise, because it also discourages legitimate repetition.
     3. If even that loops, the output is cut after the cycle's first occurrence.

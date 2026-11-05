@@ -987,7 +987,9 @@ impl TranslatorView {
                     // Only superseded jobs are cancelled, and those are no longer current.
                     StopReason::Cancelled => Status::Ready,
                     // Documents resolve runaway output themselves; these end single requests only.
-                    StopReason::Repetition { .. } | StopReason::LengthLimit => Status::Ready,
+                    StopReason::Repetition { .. }
+                    | StopReason::LengthLimit
+                    | StopReason::Incomplete => Status::Ready,
                 };
             }
             Event::Failed { job, error } if is_current(job) => {
