@@ -838,6 +838,19 @@ impl TranslatorView {
         let is_current = |job| self.current_job == Some(job);
         match event {
             Event::Devices(devices) => {
+                // Logged so reports of an unused GPU show whether it was detected at all.
+                for d in &devices {
+                    crate::app_log!(
+                        "device {}: {} ({}, {:?}) {} — {} MiB free of {}",
+                        d.index,
+                        d.name,
+                        d.backend,
+                        d.kind,
+                        d.description,
+                        d.memory_free >> 20,
+                        d.memory_total >> 20
+                    );
+                }
                 self.backend.update(cx, |backend, cx| {
                     backend.set_devices(devices.clone(), window, cx)
                 });
