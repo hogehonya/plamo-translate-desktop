@@ -175,6 +175,39 @@ pub fn ui_language_choices() -> Vec<Choice<UiLanguage>> {
     ]
 }
 
+/// Chunk size options, in tokens. Chunks are also capped at a sixth of the context, so larger
+/// values would not take effect.
+pub const CHUNK_TOKEN_PRESETS: &[usize] = &[256, 512, 1024, 2048, 4096];
+
+/// History size options, in tokens. History is also capped at a third of the context.
+pub const HISTORY_TOKEN_PRESETS: &[usize] = &[0, 1024, 2048, 4096, 8192];
+
+/// Token count options: `presets`, plus `current` if it is not one of them (a value edited in
+/// settings.json). `default` is marked.
+pub fn token_choices(presets: &[usize], current: usize, default: usize) -> Vec<Choice<usize>> {
+    let mut values = presets.to_vec();
+    if !values.contains(&current) {
+        values.push(current);
+        values.sort_unstable();
+    }
+    values
+        .into_iter()
+        .map(|n| {
+            let title = if n == 0 {
+                t!("settings.history_none").into_owned()
+            } else {
+                t!("settings.tokens", count = n).into_owned()
+            };
+            let title = if n == default {
+                t!("settings.default", value = title).into_owned()
+            } else {
+                title
+            };
+            Choice::new(n, title, &[])
+        })
+        .collect()
+}
+
 /// Appearance options.
 pub fn theme_choices() -> Vec<Choice<ThemeSetting>> {
     [

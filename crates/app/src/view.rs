@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use engine::StopReason;
+use engine::document::DocumentOptions;
 use engine::llama::{Device, RuntimeOptions, SessionOptions};
 use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use engine::pfml::{GlossaryEntry, LangCode, TranslationOptions};
@@ -27,7 +28,7 @@ use crate::backend::{self, BackendEvent, BackendPanel};
 use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
-use crate::settings::{self, Settings, ThemeSetting, UiLanguage};
+use crate::settings::{self, DocumentSettings, Settings, ThemeSetting, UiLanguage};
 
 actions!(translator, [CopyTranslation]);
 
@@ -46,6 +47,23 @@ const STREAM_FRAME: Duration = Duration::from_millis(50);
 const COPY_TRANSLATION_KEY: &str = "cmd-shift-c";
 #[cfg(not(target_os = "macos"))]
 const COPY_TRANSLATION_KEY: &str = "ctrl-shift-c";
+
+/// Chunk and history size options for the settings dialog.
+fn token_choices(document: &DocumentSettings) -> (Vec<Choice<usize>>, Vec<Choice<usize>>) {
+    let defaults = DocumentSettings::default();
+    (
+        lang::token_choices(
+            lang::CHUNK_TOKEN_PRESETS,
+            document.chunk_tokens,
+            defaults.chunk_tokens,
+        ),
+        lang::token_choices(
+            lang::HISTORY_TOKEN_PRESETS,
+            document.history_tokens,
+            defaults.history_tokens,
+        ),
+    )
+}
 
 /// Switches between the light and dark theme, following the OS for [`ThemeSetting::System`].
 pub fn apply_theme(theme: ThemeSetting, window: &mut Window, cx: &mut App) {
@@ -70,11 +88,13 @@ type TargetSelect = SelectState<SearchableVec<Choice<TargetChoice>>>;
 type StyleSelect = SelectState<Vec<Choice<StyleChoice>>>;
 type UiLanguageSelect = SelectState<Vec<Choice<UiLanguage>>>;
 type ThemeSelect = SelectState<Vec<Choice<ThemeSetting>>>;
+type TokensSelect = SelectState<Vec<Choice<usize>>>;
 
 /// One translation request: the text and every option that affects its output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Request {
     options: TranslationOptions,
+    document: DocumentOptions,
     text: String,
 }
 
@@ -124,6 +144,8 @@ pub struct TranslatorView {
     style_select: Entity<StyleSelect>,
     ui_language_select: Entity<UiLanguageSelect>,
     theme_select: Entity<ThemeSelect>,
+    chunk_select: Entity<TokensSelect>,
+    history_select: Entity<TokensSelect>,
     source_choice: SourceChoice,
     target_choice: TargetChoice,
     style_choice: StyleChoice,
@@ -228,6 +250,15 @@ impl TranslatorView {
             let selected = lang::position(&choices, &settings.theme).map(IndexPath::new);
             cx.new(|cx| SelectState::new(choices, selected, window, cx))
         };
+        let (chunk_choices, history_choices) = token_choices(&settings.document);
+        let chunk_select = {
+            let selected = lang::position(&chunk_choices, &settings.document.chunk_tokens);
+            cx.new(|cx| SelectState::new(chunk_choices, selected.map(IndexPath::new), window, cx))
+        };
+        let history_select = {
+            let selected = lang::position(&history_choices, &settings.document.history_tokens);
+            cx.new(|cx| SelectState::new(history_choices, selected.map(IndexPath::new), window, cx))
+        };
 
         let backend = cx.new(|cx| BackendPanel::new(settings.backend.clone(), window, cx));
         let store = ModelStore::new(settings::models_dir());
@@ -280,6 +311,30 @@ impl TranslatorView {
             cx.subscribe_in(&theme_select, window, |this, _, event, window, cx| {
                 if let SelectEvent::Confirm(Some(theme)) = event {
                     this.set_theme(*theme, window, cx);
+                }
+            }),
+            cx.subscribe_in(&chunk_select, window, |this, _, event, window, cx| {
+                if let SelectEvent::Confirm(Some(tokens)) = event {
+                    this.set_document(
+                        DocumentSettings {
+                            chunk_tokens: *tokens,
+                            ..this.settings.document
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            }),
+            cx.subscribe_in(&history_select, window, |this, _, event, window, cx| {
+                if let SelectEvent::Confirm(Some(tokens)) = event {
+                    this.set_document(
+                        DocumentSettings {
+                            history_tokens: *tokens,
+                            ..this.settings.document
+                        },
+                        window,
+                        cx,
+                    );
                 }
             }),
             cx.observe_window_appearance(window, |this, window, cx| {
@@ -347,6 +402,8 @@ impl TranslatorView {
             style_select,
             ui_language_select,
             theme_select,
+            chunk_select,
+            history_select,
             source_choice,
             target_choice,
             style_choice,
@@ -609,17 +666,21 @@ impl TranslatorView {
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let language = self.ui_language_select.clone();
         let theme = self.theme_select.clone();
+        let chunk = self.chunk_select.clone();
+        let history = self.history_select.clone();
+        let muted = cx.theme().muted_foreground;
         window.open_dialog(cx, move |dialog, _, _| {
             let row = |label: &str, select: AnyElement| {
                 h_flex()
                     .gap_3()
                     .text_sm()
-                    .child(div().w(px(120.)).child(t!(label).into_owned()))
+                    .child(div().w(px(140.)).child(t!(label).into_owned()))
                     .child(select)
             };
+            let select = |state: &Entity<_>| Select::new(state).w(px(260.)).into_any_element();
             dialog
                 .title(t!("settings.title").into_owned())
-                .w(px(480.))
+                .w(px(520.))
                 .child(
                     v_flex()
                         .gap_3()
@@ -630,9 +691,36 @@ impl TranslatorView {
                         .child(row(
                             "settings.theme",
                             Select::new(&theme).w(px(260.)).into_any_element(),
-                        )),
+                        ))
+                        .child(row("settings.chunk", select(&chunk)))
+                        .child(row("settings.history", select(&history)))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(t!("settings.document_note").into_owned()),
+                        ),
                 )
         });
+    }
+
+    fn set_document(
+        &mut self,
+        document: DocumentSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings.document == document {
+            return;
+        }
+        self.settings.document = document;
+        self.settings.save();
+        crate::app_log!(
+            "long texts: chunks of {} tokens, history of {} tokens",
+            document.chunk_tokens,
+            document.history_tokens
+        );
+        self.options_changed(window, cx);
     }
 
     fn set_theme(&mut self, theme: ThemeSetting, window: &mut Window, cx: &mut Context<Self>) {
@@ -687,6 +775,16 @@ impl TranslatorView {
         self.theme_select.update(cx, |state, cx| {
             state.set_items(lang::theme_choices(), window, cx);
             state.set_selected_value(&theme, window, cx);
+        });
+        let document = self.settings.document;
+        let (chunk_choices, history_choices) = token_choices(&document);
+        self.chunk_select.update(cx, |state, cx| {
+            state.set_items(chunk_choices, window, cx);
+            state.set_selected_value(&document.chunk_tokens, window, cx);
+        });
+        self.history_select.update(cx, |state, cx| {
+            state.set_items(history_choices, window, cx);
+            state.set_selected_value(&document.history_tokens, window, cx);
         });
         for (input, key) in [
             (&self.source, "source.placeholder"),
@@ -775,7 +873,11 @@ impl TranslatorView {
         }
         options.context = self.context.clone();
         options.glossary = self.glossary.clone();
-        Request { options, text }
+        Request {
+            options,
+            document: self.settings.document.options(),
+            text,
+        }
     }
 
     fn translate_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -811,10 +913,11 @@ impl TranslatorView {
 
         let target = self.target_choice.resolve(&request.text);
         self.set_translation(String::new(), window, cx);
-        self.current_job = Some(
-            self.worker
-                .translate(request.options.clone(), request.text.clone()),
-        );
+        self.current_job = Some(self.worker.translate(
+            request.options.clone(),
+            request.document,
+            request.text.clone(),
+        ));
         self.stream_tokens = 0;
         self.stream_started = None;
         self.shown = Some(request);

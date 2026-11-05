@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use engine::document::DocumentOptions;
 use serde::{Deserialize, Serialize};
 
 fn project_dirs() -> Option<directories::ProjectDirs> {
@@ -47,6 +48,37 @@ pub struct Settings {
     pub glossary: String,
     pub ui_language: UiLanguage,
     pub theme: ThemeSetting,
+    pub document: DocumentSettings,
+}
+
+/// How long texts are split (see `engine::document`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DocumentSettings {
+    /// Upper bound for one chunk, in tokens.
+    pub chunk_tokens: usize,
+    /// Upper bound for the history sent with each chunk, in tokens.
+    pub history_tokens: usize,
+}
+
+impl Default for DocumentSettings {
+    fn default() -> Self {
+        let defaults = DocumentOptions::default();
+        Self {
+            chunk_tokens: defaults.max_chunk_tokens,
+            history_tokens: defaults.max_history_tokens,
+        }
+    }
+}
+
+impl DocumentSettings {
+    pub fn options(self) -> DocumentOptions {
+        DocumentOptions {
+            // A chunk of a few tokens would only split sentences apart.
+            max_chunk_tokens: self.chunk_tokens.max(64),
+            max_history_tokens: self.history_tokens,
+        }
+    }
 }
 
 /// Light or dark appearance.
@@ -187,6 +219,13 @@ mod tests {
         assert_eq!(s.theme, super::ThemeSetting::System);
         let s: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(s.theme, super::ThemeSetting::Dark);
+        assert_eq!(s.document, super::DocumentSettings::default());
+        let s: Settings = serde_json::from_str(r#"{"document":{"chunk_tokens":512}}"#).unwrap();
+        assert_eq!(s.document.chunk_tokens, 512);
+        assert_eq!(
+            s.document.history_tokens,
+            super::DocumentSettings::default().history_tokens
+        );
     }
 
     #[test]

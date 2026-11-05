@@ -93,6 +93,7 @@ enum Command {
     Translate {
         job: JobId,
         options: TranslationOptions,
+        document: DocumentOptions,
         text: String,
     },
 }
@@ -131,9 +132,19 @@ impl Worker {
     }
 
     /// Starts a translation, cancelling any earlier one. Returns the new job id.
-    pub fn translate(&self, options: TranslationOptions, text: String) -> JobId {
+    pub fn translate(
+        &self,
+        options: TranslationOptions,
+        document: DocumentOptions,
+        text: String,
+    ) -> JobId {
         let job = self.latest.fetch_add(1, Ordering::SeqCst) + 1;
-        self.send(Command::Translate { job, options, text });
+        self.send(Command::Translate {
+            job,
+            options,
+            document,
+            text,
+        });
         job
     }
 
@@ -229,10 +240,15 @@ fn serve(
 
     loop {
         let command = commands.recv().ok()?;
-        let (job, options, text) = match command {
+        let (job, options, document, text) = match command {
             Command::Load(_) => return Some(command),
             Command::Unload => return None,
-            Command::Translate { job, options, text } => (job, options, text),
+            Command::Translate {
+                job,
+                options,
+                document,
+                text,
+            } => (job, options, document, text),
         };
         if latest.load(Ordering::SeqCst) != job {
             continue;
@@ -242,7 +258,7 @@ fn serve(
             &mut session,
             &|s| model.count_tokens(s),
             n_ctx,
-            &DocumentOptions::default(),
+            &document,
             &options,
             &text,
             &mut |output| match output {

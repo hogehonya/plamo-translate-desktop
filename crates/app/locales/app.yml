@@ -385,6 +385,24 @@ settings.language_system:
 settings.theme:
   en: Theme
   ja: テーマ
+settings.chunk:
+  en: Chunk size
+  ja: 分割の大きさ
+settings.history:
+  en: History
+  ja: 履歴の量
+settings.tokens:
+  en: "%{count} tokens"
+  ja: "%{count} トークン"
+settings.history_none:
+  en: None
+  ja: なし
+settings.default:
+  en: "%{value} (default)"
+  ja: "%{value}（既定）"
+settings.document_note:
+  en: "Long texts are split between paragraphs into chunks of at most this size and translated in order, each with up to this much of the preceding text and its translation. Larger chunks make loops and skipped passages more likely."
+  ja: "長い文章は、段落の切れ目でこの大きさ以下の塊に分けて順に訳します。各塊には、直前の原文と訳文をこの量まで添えます。塊を大きくすると、繰り返しや訳抜けが起きやすくなります。"
 settings.theme_system:
   en: System
   ja: システムに合わせる

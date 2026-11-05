@@ -159,6 +159,8 @@ The first implementation is `LlamaCppBackend`:
     Only a sentence that is still too long is split at its line breaks.
   - Leading whitespace and the separators between chunks are copied unchanged into the output.
 - Budget: a chunk gets at most 1,024 tokens and history at most 4,096 (`DocumentOptions`).
+  Settings → Chunk size and History change these (256–4,096 and none–8,192 tokens; other values can be set in `settings.json`).
+  They are part of the translation cache key.
   They are further limited to 1/6 and 1/3 of `n_ctx` minus the fixed parts (context and glossary, plus a margin of 64 tokens),
   so the output always has room for three times the chunk.
 - Why chunks are small, although the model was trained on 32k tokens:
