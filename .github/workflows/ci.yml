@@ -98,7 +98,8 @@ jobs:
           key: windows-${{ env.VULKAN_VERSION }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: windows-${{ env.VULKAN_VERSION }}-
 
-      - run: cargo clippy --workspace --all-targets --release --features $env:FEATURES -- -D warnings
+      # Lints run on Linux only: each extra cargo invocation recompiles the GPUI stack, and
+      # the workspace has almost no Windows-specific code.
       - run: cargo test --workspace --release --features $env:FEATURES
       - run: cargo build --workspace --release --bins --examples --features $env:FEATURES
 
