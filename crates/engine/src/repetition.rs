@@ -36,6 +36,8 @@ impl Loop {
 
 #[derive(Debug, Clone)]
 pub struct LoopDetector {
+    /// The prompt, for [`LoopDetector::keep`].
+    input: Vec<i32>,
     tokens: Vec<i32>,
     /// `runs[p - 1]`: how many tokens at the end equal the token `p` positions earlier.
     runs: Vec<usize>,
@@ -46,6 +48,7 @@ impl LoopDetector {
     /// A detector that reports periodic spans of at least `min_span` tokens.
     pub fn new(min_span: usize) -> Self {
         Self {
+            input: Vec::new(),
             tokens: Vec::new(),
             runs: vec![0; MAX_PERIOD],
             min_span,
@@ -55,7 +58,21 @@ impl LoopDetector {
     /// A detector calibrated to the prompt: a span counts as a loop only if it is well beyond
     /// any repetition the input itself contains, such as a ruler of dashes or a refrain.
     pub fn for_input(input: &[i32]) -> Self {
-        Self::new(MIN_LOOP_SPAN.max(2 * longest_periodic_span(input)))
+        Self {
+            input: input.to_vec(),
+            ..Self::new(MIN_LOOP_SPAN.max(2 * longest_periodic_span(input)))
+        }
+    }
+
+    /// Number of generated tokens worth keeping when the output ends in `found`.
+    ///
+    /// That is the cycle's first occurrence, unless the input contains the same cycle: text the
+    /// model copies, such as repeated lines of code, legitimately repeats as often as in the
+    /// input, and only the repeats beyond that are the loop.
+    pub fn keep(&self, found: Loop) -> usize {
+        let cycle = &self.tokens[found.start..found.first_end()];
+        let repeats = max_consecutive_repeats(&self.input, cycle).max(1);
+        (found.start + repeats * found.period).min(self.tokens.len())
     }
 
     /// Adds a generated token. Returns the loop if the output now ends in one.
@@ -80,6 +97,20 @@ impl LoopDetector {
         }
         found
     }
+}
+
+/// The largest number of back-to-back occurrences of `cycle` in `tokens`.
+fn max_consecutive_repeats(tokens: &[i32], cycle: &[i32]) -> usize {
+    let period = cycle.len();
+    let mut best = 0;
+    for start in 0..tokens.len() {
+        let mut repeats = 0;
+        while tokens[start + repeats * period..].starts_with(cycle) {
+            repeats += 1;
+        }
+        best = best.max(repeats);
+    }
+    best
 }
 
 /// The longest span of `tokens` that repeats a cycle of at most [`MAX_PERIOD`] tokens at least
@@ -180,6 +211,26 @@ mod tests {
         // The output may repeat as much as the input does, but not without bound.
         assert_eq!(feed(&mut d, (0..150).map(|i| i % 4)), None);
         assert!(feed(&mut d, (150..300).map(|i| i % 4)).is_some());
+    }
+
+    #[test]
+    fn keeps_as_many_repeats_as_the_input_has() {
+        // The input repeats a 5-token line 30 times; the output copies it and does not stop.
+        let line = [10, 11, 12, 13, 14];
+        let input: Vec<i32> = std::iter::once(1)
+            .chain(line.iter().copied().cycle().take(5 * 30))
+            .chain([2])
+            .collect();
+        let mut d = LoopDetector::for_input(&input);
+        let output = std::iter::once(7).chain(line.iter().copied().cycle().take(5 * 100));
+        let found = feed(&mut d, output).unwrap();
+        assert_eq!(found.period, 5);
+        assert_eq!(d.keep(found), 1 + 5 * 30);
+
+        // A cycle the input does not contain keeps its first occurrence only.
+        let mut d = LoopDetector::for_input(&input);
+        let found = feed(&mut d, [3, 4, 5, 6].iter().copied().cycle().take(400)).unwrap();
+        assert_eq!(d.keep(found), found.first_end());
     }
 
     #[test]

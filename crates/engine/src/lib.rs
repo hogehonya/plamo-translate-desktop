@@ -52,7 +52,8 @@ pub enum StopReason {
     /// The context window filled up before the translation finished.
     ContextFull,
     /// The output fell into a loop (see [`repetition`]). `kept` is the length in bytes of the
-    /// output up to the end of the cycle's first occurrence.
+    /// output worth keeping: up to the end of the cycle's first occurrence, or, for a cycle
+    /// copied from the input, as many repeats as the input has.
     Repetition { kept: usize },
     /// The output reached [`Generation::max_tokens`].
     LengthLimit,

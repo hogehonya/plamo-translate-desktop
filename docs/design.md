@@ -193,6 +193,8 @@ The first implementation is `LlamaCppBackend`:
     2. A sentence that runs away again is retried with llama.cpp's DRY sampler (multiplier 0.8, base 1.75, allowed length 2), which penalizes the output repeating itself.
        DRY is not used otherwise, because it also discourages legitimate repetition.
     3. If even that loops, the output is cut after the cycle's first occurrence.
+       When the prompt contains the same cycle (text copied verbatim, such as repeated lines of code), as many repeats as the prompt has are kept:
+       the model tends to copy such text and not stop, and only the repeats beyond the source's are the loop.
   - Output that ran away never enters the history, so one loop cannot seed the next.
   - The app logs retries and cuts to `app.log` (without text). The status bar reports cuts.
 - The worker reports `Chunk { index, count }`, and the status bar shows progress such as `(2/5)`.

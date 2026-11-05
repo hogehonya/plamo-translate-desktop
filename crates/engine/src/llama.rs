@@ -401,7 +401,7 @@ impl TranslationBackend for Session<'_> {
 
             if let Some(found) = loops.push(token.0) {
                 break StopReason::Repetition {
-                    kept: ends[found.first_end() - 1],
+                    kept: ends[loops.keep(found) - 1],
                 };
             }
             if generated >= generation.max_tokens {
