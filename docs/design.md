@@ -417,7 +417,8 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
     Lints and tests run on Linux only, so Windows code is compiled only by the Release workflow.
   - The `translate` CLI is built and used for a smoke test (`--list-devices` with the package's own libraries), but it is not shipped.
 - The Release workflow builds the packages, with the latest stable Rust:
-  - Pushing a tag `vX.Y.Z` publishes a GitHub release with generated notes and `SHA256SUMS.txt`. The tag must match the workspace version.
+  - Pushing a tag `vX.Y.Z` publishes a GitHub release with `SHA256SUMS.txt`. The tag must match the workspace version.
+    The notes are the version's section of `CHANGELOG.md` (`scripts/changelog.sh`), followed by GitHub's generated notes.
   - A manual run (**Run workflow**, from any branch) builds the same packages as workflow artifacts without publishing,
     versioned `X.Y.Z-dev.<commit>`, plus the Windows `translate.exe` for testing the engine on Windows GPUs.
   - Windows: a portable zip with the exe, the DLLs and backend modules, the Visual C++ runtime, the READMEs, the licenses,
@@ -465,18 +466,18 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     and `configure { model, device }` (the extension's own choices; absent fields follow the app).
   - Responses: `status` (starting, loading, ready, no_model, error), `options` (downloaded models, devices, and the current choices),
     `started`, `progress`, `text`, `segment { index, text }`, `rewind` (a UTF-16 length, as JavaScript counts),
-    `done { tokens, cut, stopped }`, and `error` with a code the extension localizes.
+    `done { tokens, cut, stopped, cancelled }`, and `error` with a code the extension localizes.
   - The host reads the app's settings before each request and reloads when the model or device changed.
     It uses the app's glossary, chunk and history sizes, and cut marker.
   - The panel's model and device choices are kept by the extension and sent in `configure` when it connects;
     the host loads nothing before the first request, so the app's model is not loaded only to be replaced.
     Writing them into the app's settings would have been undone by the app's next save.
-  - A new request supersedes the running one, as in the app; the superseded one ends with `done { stopped }`.
+  - A new request supersedes the running one, as in the app; the superseded one ends with `done { stopped, cancelled }`.
 - Closing the port ends the host and frees the model's memory and the app's files (which Windows keeps locked while the host runs).
   The next request starts it again.
 - Page translation (`page.js`, injected on request with `activeTab`, or from the panel with the optional all-sites permission):
   - The page is cut into runs: consecutive text and inline elements within one block. Code, line breaks, and text marked `translate="no"`
-    or `notranslate` stay as they are inside a run; `pre`, form controls, scripts, and similar are skipped, as are Japanese runs for a Japanese target.
+    or `notranslate` stay as they are inside a run; `pre`, form controls, scripts, and similar are skipped, as are Japanese runs for a Japanese target (not for easy Japanese, which rewrites them).
   - A run is sent as simple HTML whose elements carry an index instead of their attributes (`see the <a i="2">guide</a>`).
     PLaMo 3 Translate keeps such tags in place and reorders them with the sentence (checked with 0.8B and 2B, HTML and Markdown).
   - The translation is parsed inertly (`DOMParser`) and rebuilt from text nodes and clones of the run's own elements, looked up by index,

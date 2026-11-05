@@ -256,6 +256,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: packages
@@ -269,7 +270,11 @@ jobs:
           (cd packages && sha256sum -- * > SHA256SUMS.txt)
           ls -l packages
           cat packages/SHA256SUMS.txt
+          # This version's section of the changelog, before GitHub's generated notes.
+          scripts/changelog.sh "$VERSION" > notes.md
+          cat notes.md
           gh release create "v$VERSION" packages/* \
             --title "PLaMo Translate Desktop $VERSION" \
+            --notes-file notes.md \
             --generate-notes \
             --verify-tag

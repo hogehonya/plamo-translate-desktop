@@ -90,6 +90,19 @@ pub struct TranslateStats {
 }
 
 impl TranslateStats {
+    /// The stats of a job cancelled before it started.
+    pub fn cancelled() -> Self {
+        Self {
+            prompt_tokens: 0,
+            generated_tokens: 0,
+            prompt_duration: Duration::ZERO,
+            generation_duration: Duration::ZERO,
+            stop_reason: StopReason::Cancelled,
+            retries: 0,
+            cut: 0,
+        }
+    }
+
     pub fn generation_tokens_per_second(&self) -> f64 {
         let secs = self.generation_duration.as_secs_f64();
         if secs > 0.0 {

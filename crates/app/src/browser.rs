@@ -8,6 +8,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Name the extension connects to.
 pub const HOST_NAME: &str = "com.github.tanakh.plamo_translate";
@@ -21,22 +22,31 @@ const HOST_FILE: &str = "plamo-translate-host.exe";
 #[cfg(not(windows))]
 const HOST_FILE: &str = "plamo-translate-host";
 
-/// The host executable next to the app, if it is there.
+/// The host executable next to the app, if it is there. Looked up once, like
+/// [`extension_dir`]: the settings dialog asks on every render.
 pub fn host_executable() -> Option<PathBuf> {
-    let path = std::env::current_exe().ok()?.with_file_name(HOST_FILE);
-    path.is_file().then_some(path)
+    static HOST: OnceLock<Option<PathBuf>> = OnceLock::new();
+    HOST.get_or_init(|| {
+        let path = std::env::current_exe().ok()?.with_file_name(HOST_FILE);
+        path.is_file().then_some(path)
+    })
+    .clone()
 }
 
 /// The extension's folder: `browser-extension` next to the app in a package, or the source
 /// tree's `extension` in a development build.
 pub fn extension_dir() -> Option<PathBuf> {
-    let packaged = std::env::current_exe()
-        .ok()?
-        .with_file_name("browser-extension");
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extension");
-    [packaged, source]
-        .into_iter()
-        .find(|dir| dir.join("manifest.json").is_file())
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let packaged = std::env::current_exe()
+            .ok()?
+            .with_file_name("browser-extension");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extension");
+        [packaged, source]
+            .into_iter()
+            .find(|dir| dir.join("manifest.json").is_file())
+    })
+    .clone()
 }
 
 /// Whether the host is registered, and where.

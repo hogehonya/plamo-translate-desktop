@@ -197,6 +197,16 @@ impl Settings {
     /// A file that does not parse is renamed to `settings.json.invalid` rather than overwritten
     /// by the next save, so the license acceptance and the glossary in it can be recovered.
     pub fn load() -> Self {
+        Self::read_from_disk(true)
+    }
+
+    /// Like [`Settings::load`], but leaves a file that does not parse where it is. For the
+    /// browser host, which never saves: the file may be the app's, written by a newer version.
+    pub fn read() -> Self {
+        Self::read_from_disk(false)
+    }
+
+    fn read_from_disk(move_invalid: bool) -> Self {
         let Some(path) = settings_path() else {
             return Self::default();
         };
@@ -205,7 +215,7 @@ impl Settings {
         };
         serde_json::from_str(&text).unwrap_or_else(|e| {
             let aside = path.with_extension("json.invalid");
-            let moved = std::fs::rename(&path, &aside).is_ok();
+            let moved = move_invalid && std::fs::rename(&path, &aside).is_ok();
             crate::app_log!(
                 "ignoring invalid settings in {}: {e}{}",
                 path.display(),

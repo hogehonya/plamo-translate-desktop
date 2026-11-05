@@ -103,8 +103,8 @@ struct Shared {
     job: Option<(JobId, u64)>,
     /// The translation sent so far, to convert rewinds into UTF-16 lengths.
     output: String,
-    /// Loads sent to the worker whose result has not arrived; only the last one's result
-    /// describes the model in use.
+    /// Loads and unloads sent to the worker whose result (`Loaded`, `LoadFailed`, or
+    /// `Unloaded`) has not arrived; only the last one's result describes the model in use.
     pending_loads: usize,
 }
 
@@ -294,7 +294,7 @@ impl Host {
     /// Loads the model selected in the app's settings, unless it is already loaded. Returns the
     /// settings.
     fn refresh_model(&mut self) -> Settings {
-        let settings = Settings::load();
+        let settings = Settings::read();
         let selected = self.selected_model(&settings);
         let device = self
             .device_choice
@@ -302,7 +302,9 @@ impl Host {
             .unwrap_or_else(|| settings.backend.device.clone());
         let model = selected.as_ref().map(|(_, label)| label.clone());
         let wanted = selected.map(|(path, _)| (path, device));
-        if self.loaded.as_ref() == Some(&wanted) {
+        // After an error (a missing file, a failed load) the same selection is tried again:
+        // the model may have been downloaded since, or memory freed.
+        if self.loaded.as_ref() == Some(&wanted) && self.lock().status.state != "error" {
             return settings;
         }
         self.loaded = Some(wanted.clone());
@@ -320,6 +322,7 @@ impl Host {
             return settings;
         }
         let Some((path, device_setting)) = wanted else {
+            self.lock().pending_loads += 1;
             self.worker.unload();
             self.set_status(Status {
                 state: "no_model",
@@ -425,6 +428,7 @@ impl Host {
                 tokens: 0,
                 cut: 0,
                 stopped: true,
+                cancelled: true,
             });
         }
         shared.output.clear();
@@ -526,9 +530,13 @@ fn on_event(shared: &(Mutex<Shared>, Condvar), out: &Output, event: Event) {
             s.devices = Some(devices);
             ready.notify_all();
         }
-        Event::Loaded(_) | Event::LoadFailed(_) if s.pending_loads > 1 => {
-            // A newer load follows.
+        Event::Loaded(_) | Event::LoadFailed(_) | Event::Unloaded if s.pending_loads > 1 => {
+            // A newer load or unload follows.
             s.pending_loads -= 1;
+        }
+        Event::Unloaded => {
+            // The status says no_model already.
+            s.pending_loads = 0;
         }
         Event::Loaded(_) => {
             s.pending_loads = 0;
@@ -589,6 +597,7 @@ fn on_event(shared: &(Mutex<Shared>, Condvar), out: &Output, event: Event) {
                         tokens: stats.generated_tokens,
                         cut: stats.cut,
                         stopped: stats.stop_reason != StopReason::Finished,
+                        cancelled: stats.stop_reason == StopReason::Cancelled,
                     },
                 );
             }
@@ -606,6 +615,6 @@ fn on_event(shared: &(Mutex<Shared>, Condvar), out: &Output, event: Event) {
                 );
             }
         }
-        Event::LoadProgress(_) | Event::Unloaded | Event::Retry { .. } => {}
+        Event::LoadProgress(_) | Event::Retry { .. } => {}
     }
 }

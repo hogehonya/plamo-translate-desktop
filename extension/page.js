@@ -115,8 +115,9 @@
   function translatable(run) {
     const text = runText(run);
     if (text.length < 2 || !LETTER.test(text)) return false;
-    // Already Japanese. (Other languages cannot be told apart this cheaply.)
-    return !(target.startsWith("ja") && KANA.test(text));
+    // Already Japanese. (Other languages cannot be told apart this cheaply.) Easy Japanese
+    // rewrites Japanese too.
+    return !(target === "ja" && KANA.test(text));
   }
 
   // ---- Serializing and rebuilding ----
@@ -231,7 +232,10 @@
           render(t("pageStoppedForOther"));
           break;
         case "error":
-          pending.clear();
+          // Sent to every page when the connection ends; nothing to say if this one was done.
+          if (!pending.size) break;
+          // Resume sends the rest again.
+          stopLocally();
           render(message.code === "released" ? t("pageStopped") : t("pageError", message.message || message.code));
           break;
       }
@@ -239,7 +243,7 @@
     port.onDisconnect.addListener(() => {
       port = null;
       if (pending.size) {
-        pending.clear();
+        stopLocally();
         render(t("pageStopped"));
       }
     });

@@ -5,7 +5,8 @@
 //!
 //! Jobs supersede each other: submitting a translation cancels the one in flight, and queued
 //! jobs that are already stale are skipped. That keeps auto-translate responsive while the
-//! user types.
+//! user types. Every job ends with one [`Event::Finished`] or [`Event::Failed`], a skipped one
+//! with [`StopReason::Cancelled`].
 
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
@@ -92,6 +93,7 @@ pub enum Event {
         source: (usize, usize),
         output: (usize, usize),
     },
+    /// The job ended: finished, cancelled (also before it started), or cut short.
     Finished {
         job: JobId,
         stats: TranslateStats,
@@ -295,91 +297,89 @@ fn serve(
 
     loop {
         let command = commands.recv().ok()?;
-        let (job, options, document, text) = match command {
+        let job = match &command {
             Command::Load(_) => return Some(command),
             Command::Unload => return None,
-            Command::Translate {
-                job,
-                options,
-                document,
-                text,
-            } => (job, options, document, text),
-            Command::TranslateSegments {
-                job,
-                options,
-                document,
-                segments,
-            } => {
-                if latest.load(Ordering::SeqCst) == job {
-                    let n_ctx = session.n_ctx();
-                    let result = translate_segments(
-                        &mut session,
-                        &|s| model.count_tokens(s),
-                        n_ctx,
-                        &document,
-                        &options,
-                        &segments,
-                        &mut |index, text| events(Event::Segment { job, index, text }),
-                        &|| latest.load(Ordering::Relaxed) != job,
-                    );
-                    events(match result {
-                        Ok(stats) => Event::Finished { job, stats },
-                        Err(e) => Event::Failed {
-                            job,
-                            error: e.to_string(),
-                        },
-                    });
-                }
-                continue;
-            }
+            Command::Translate { job, .. } | Command::TranslateSegments { job, .. } => *job,
         };
         if latest.load(Ordering::SeqCst) != job {
+            // Cancelled or superseded before it started. Reported all the same, so that a
+            // caller waiting for this job (the browser host) learns that it ended.
+            events(Event::Finished {
+                job,
+                stats: TranslateStats::cancelled(),
+            });
             continue;
         }
         let n_ctx = session.n_ctx();
-        let result = translate_document(
-            &mut session,
-            &|s| model.count_tokens(s),
-            n_ctx,
-            &document,
-            &options,
-            &text,
-            &mut |output| match output {
-                Output::Text(text) => events(Event::Token {
-                    job,
-                    text: text.to_owned(),
-                }),
-                Output::Truncate(len) => events(Event::Rewind { job, len }),
-            },
-            &mut |progress| match progress {
-                Progress::Chunk {
-                    index,
-                    count,
-                    source,
-                } => events(Event::Chunk {
-                    job,
-                    index,
-                    count,
-                    source,
-                }),
-                Progress::Retry { index, reason, .. } => {
-                    events(Event::Retry { job, index, reason })
-                }
-                Progress::Cut {
-                    index,
-                    reason,
-                    source,
-                    output,
-                } => events(Event::Cut {
-                    job,
-                    index,
-                    reason,
-                    source,
-                    output,
-                }),
-            },
-            &|| latest.load(Ordering::Relaxed) != job,
-        );
+        let count_tokens = |s: &str| model.count_tokens(s);
+        let is_cancelled = || latest.load(Ordering::Relaxed) != job;
+        let result = match command {
+            Command::Translate {
+                options,
+                document,
+                text,
+                ..
+            } => translate_document(
+                &mut session,
+                &count_tokens,
+                n_ctx,
+                &document,
+                &options,
+                &text,
+                &mut |output| match output {
+                    Output::Text(text) => events(Event::Token {
+                        job,
+                        text: text.to_owned(),
+                    }),
+                    Output::Truncate(len) => events(Event::Rewind { job, len }),
+                },
+                &mut |progress| match progress {
+                    Progress::Chunk {
+                        index,
+                        count,
+                        source,
+                    } => events(Event::Chunk {
+                        job,
+                        index,
+                        count,
+                        source,
+                    }),
+                    Progress::Retry { index, reason, .. } => {
+                        events(Event::Retry { job, index, reason })
+                    }
+                    Progress::Cut {
+                        index,
+                        reason,
+                        source,
+                        output,
+                    } => events(Event::Cut {
+                        job,
+                        index,
+                        reason,
+                        source,
+                        output,
+                    }),
+                },
+                &is_cancelled,
+            ),
+            Command::TranslateSegments {
+                options,
+                document,
+                segments,
+                ..
+            } => translate_segments(
+                &mut session,
+                &count_tokens,
+                n_ctx,
+                &document,
+                &options,
+                &segments,
+                &mut |index, text| events(Event::Segment { job, index, text }),
+                &is_cancelled,
+            ),
+            Command::Load(_) | Command::Unload => unreachable!("handled above"),
+        };
         events(match result {
             Ok(stats) => Event::Finished { job, stats },
             Err(e) => Event::Failed {

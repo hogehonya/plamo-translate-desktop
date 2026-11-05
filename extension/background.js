@@ -24,6 +24,8 @@ const MENUS = [
 ];
 
 let host = null;
+/** Settles once the new connection's `configure` is sent; messages wait for it. */
+let hostReady = Promise.resolve();
 let idleTimer = null;
 let status = { type: "status", state: "released" };
 let options = null;
@@ -44,7 +46,7 @@ const pages = new Map();
 
 // ---- Native host ----
 
-async function connectHost() {
+function connectHost() {
   host = chrome.runtime.connectNative(HOST);
   host.onMessage.addListener(onHostMessage);
   host.onDisconnect.addListener(() => {
@@ -56,13 +58,25 @@ async function connectHost() {
     failAll({ code: "disconnected", message: error });
   });
   // The host loads a model only after this, so the app's model is not loaded in vain.
-  const { choices } = await chrome.storage.local.get({ choices: {} });
-  host?.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+  const connection = host;
+  hostReady = chrome.storage.local
+    .get({ choices: {} })
+    .catch(() => ({ choices: {} }))
+    .then(({ choices }) => {
+      if (host === connection) {
+        host.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+      }
+    });
 }
 
+/** Sends `message` after `configure`, connecting first if needed; messages keep their order. */
 async function sendHost(message) {
-  if (!host) await connectHost();
-  host?.postMessage(message);
+  if (!host) connectHost();
+  const connection = host;
+  await hostReady;
+  // Dropped if the connection ended meanwhile.
+  if (host !== connection) return;
+  host.postMessage(message);
   touch();
 }
 
@@ -83,7 +97,9 @@ function release(reason) {
   clearTimeout(idleTimer);
   // Closing our end fires no onDisconnect; end the jobs here.
   for (const job of jobs.values()) {
-    if (job.kind === "panel") job.port.postMessage({ type: "done", id: job.id, tokens: 0, cut: 0, stopped: true });
+    if (job.kind === "panel") {
+      job.port.postMessage({ type: "done", id: job.id, tokens: 0, cut: 0, stopped: true, cancelled: true });
+    }
   }
   jobs.clear();
   active = null;
@@ -139,9 +155,16 @@ function onBatchMessage(job, message) {
     page.port.postMessage({ type: "error", code: message.code, message: message.message });
     return;
   }
-  // Paragraphs not translated because a panel translation interrupted the batch go back to
-  // the front of the queue.
-  page.pending.unshift(...job.items.filter((item) => !item.done));
+  const undone = job.items.filter((item) => !item.done);
+  if (undone.length && !message.cancelled) {
+    // Cut short otherwise; the same batch would stop again. Resume in the page tries again.
+    page.pending = [];
+    page.port.postMessage({ type: "error", code: "failed", message: "the translation stopped early" });
+    return;
+  }
+  // Paragraphs not translated because the batch was cancelled (a panel translation
+  // interrupted it, or the model changed) go back to the front of the queue.
+  page.pending.unshift(...undone);
   reportPage(page);
 }
 

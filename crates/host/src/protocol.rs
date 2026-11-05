@@ -112,12 +112,15 @@ pub enum Response {
     /// Keep only the first `length` UTF-16 code units of the translation: output that ran away
     /// is being translated again.
     Rewind { id: u64, length: usize },
-    /// Translation `id` ended. `stopped` if it was cancelled or cut short.
+    /// Translation `id` ended. `stopped` if it was cancelled or cut short; `cancelled` if it
+    /// was cancelled (by `cancel`, a newer request, or a change of model), so that trying again
+    /// can succeed.
     Done {
         id: u64,
         tokens: usize,
         cut: usize,
         stopped: bool,
+        cancelled: bool,
     },
     /// `code` is one of `no_model`, `model_missing`, `load_failed`, `runtime_failed`,
     /// `bad_request`, or `failed`; `message` has the details in English.
