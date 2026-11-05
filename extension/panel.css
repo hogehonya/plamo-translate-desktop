@@ -27,8 +27,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 100vh;
+  /* The panel's height: the translation scrolls inside its box instead of growing the page. */
+  height: 100vh;
+  overflow: auto;
 }
+body > * { flex: none; }
 header { display: flex; align-items: center; gap: 8px; }
 h1 { font-size: 15px; margin: 0; flex: 1; }
 .status { font-size: 12px; color: var(--muted); text-align: right; }
@@ -53,11 +56,12 @@ button { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { background: var(--error); border-color: var(--error); color: #fff; }
-textarea { width: 100%; padding: 8px; resize: vertical; }
+textarea { width: 100%; padding: 8px; resize: vertical; max-height: 50vh; }
 .output-header { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
-.output {
-  flex: 1;
-  min-height: 120px;
+body > .output {
+  flex: 1 1 0;
+  min-height: 6em;
+  overflow-y: auto;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
