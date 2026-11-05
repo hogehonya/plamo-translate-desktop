@@ -375,5 +375,8 @@
   },
   "lang_uz": {
     "message": "ウズベク語"
+  },
+  "pageStoppedForOther": {
+    "message": "別のページの翻訳を始めたため中止しました"
   }
 }

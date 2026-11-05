@@ -224,6 +224,11 @@
           pending.clear();
           render();
           break;
+        case "stopped":
+          // Another page started translating.
+          stopLocally();
+          render(t("pageStoppedForOther"));
+          break;
         case "error":
           pending.clear();
           render(message.code === "released" ? t("pageStopped") : t("pageError", message.message || message.code));
@@ -239,7 +244,7 @@
     });
   }
 
-  function send(runs) {
+  function send(runs, start = false) {
     runs = runs.filter((run) => !run.some((node) => handled.has(node)));
     if (!runs.length) return;
     for (const run of runs) for (const node of run) handled.add(node);
@@ -260,7 +265,7 @@
         return { sid, text: html };
       });
     total += items.length;
-    port.postMessage({ type: "segments", items, target, style });
+    port.postMessage({ type: "segments", items, target, style, start });
     render();
   }
 
@@ -313,13 +318,17 @@
 
   function stop() {
     port?.postMessage({ type: "cancel" });
-    // The paragraphs not translated yet can be sent again by Resume.
+    stopLocally();
+    render(t("pageStopped"));
+  }
+
+  /** Forgets the paragraphs waiting, which Resume can send again. */
+  function stopLocally() {
     for (const item of pending.values()) for (const node of item.run) handled.delete(node);
     stopped = pending.size > 0;
     pending.clear();
     observer?.disconnect();
     observer = null;
-    render(t("pageStopped"));
   }
 
   /** The element whose position stands for `run`. */
@@ -372,7 +381,7 @@
       target = kana > sample.length * 0.05 ? "en" : "ja";
     }
     if (target !== "ja") style = "";
-    send(collect(document.body));
+    send(collect(document.body), true);
     if (!total) render(t("pageNothing"));
     // Paragraphs added later (infinite scrolling, expanding sections).
     observer?.disconnect();

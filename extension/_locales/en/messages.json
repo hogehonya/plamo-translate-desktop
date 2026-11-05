@@ -375,5 +375,8 @@
   },
   "lang_uz": {
     "message": "Uzbek"
+  },
+  "pageStoppedForOther": {
+    "message": "Stopped: another page is being translated"
   }
 }

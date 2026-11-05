@@ -75,7 +75,8 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
    The toolbar button opens the panel to type or paste text.
 4. To translate a whole page, right-click it and choose **Translate this page with PLaMo** (or **Translate page** in the panel).
    Paragraphs are translated in place, keeping links and formatting: those in view first, and when you scroll, the ones you scrolled to.
-   A box at the bottom right shows the progress and can stop, resume, or restore the page.
+   A box at the bottom right shows the progress and can stop, resume, or restore the page. Translating another page stops this one,
+   which can be resumed later.
    **Pages** under **Settings** in the panel shows translations below the original instead.
 
 The host uses the model and device selected in the app unless you choose others under **Settings** in the panel

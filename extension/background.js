@@ -233,6 +233,17 @@ function onPageMessage(port, message) {
   if (tabId == null) return;
   switch (message.type) {
     case "segments": {
+      // A page translation that starts (not more paragraphs of a running one) stops those of
+      // other tabs: the user has moved on. They can resume from their own page.
+      if (message.start) {
+        for (const [other, page] of pages) {
+          if (other === tabId) continue;
+          const running = page.pending.length || [...jobs.values()].some((j) => j.kind === "page" && j.tabId === other);
+          if (!running) continue;
+          stopPage(other);
+          page.port.postMessage({ type: "stopped" });
+        }
+      }
       const page = pages.get(tabId) ?? { port, pending: [] };
       page.port = port;
       page.target = message.target;
