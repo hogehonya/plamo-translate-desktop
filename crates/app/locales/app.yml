@@ -378,3 +378,13 @@ license.accept:
 license.later:
   en: Later
   ja: 後で
+
+settings.title:
+  en: Settings
+  ja: 設定
+settings.language:
+  en: Display language
+  ja: 表示言語
+settings.language_system:
+  en: "System (%{lang})"
+  ja: "システムに合わせる（%{lang}）"

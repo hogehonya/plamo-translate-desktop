@@ -27,7 +27,7 @@ use crate::backend::{self, BackendEvent, BackendPanel};
 use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
-use crate::settings::{self, Settings};
+use crate::settings::{self, Settings, UiLanguage};
 
 actions!(translator, [CopyTranslation]);
 
@@ -55,6 +55,7 @@ pub fn bind_keys(cx: &mut App) {
 type SourceSelect = SelectState<SearchableVec<Choice<SourceChoice>>>;
 type TargetSelect = SelectState<SearchableVec<Choice<TargetChoice>>>;
 type StyleSelect = SelectState<Vec<Choice<StyleChoice>>>;
+type UiLanguageSelect = SelectState<Vec<Choice<UiLanguage>>>;
 
 /// One translation request: the text and every option that affects its output.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +106,7 @@ pub struct TranslatorView {
     source_select: Entity<SourceSelect>,
     target_select: Entity<TargetSelect>,
     style_select: Entity<StyleSelect>,
+    ui_language_select: Entity<UiLanguageSelect>,
     source_choice: SourceChoice,
     target_choice: TargetChoice,
     style_choice: StyleChoice,
@@ -190,6 +192,11 @@ impl TranslatorView {
             let selected = lang::position(&choices, &style_choice).map(IndexPath::new);
             cx.new(|cx| SelectState::new(choices, selected, window, cx))
         };
+        let ui_language_select = {
+            let choices = lang::ui_language_choices();
+            let selected = lang::position(&choices, &settings.ui_language).map(IndexPath::new);
+            cx.new(|cx| SelectState::new(choices, selected, window, cx))
+        };
 
         let backend = cx.new(|cx| BackendPanel::new(settings.backend.clone(), window, cx));
         let store = ModelStore::new(settings::models_dir());
@@ -231,6 +238,11 @@ impl TranslatorView {
                 if let SelectEvent::Confirm(Some(choice)) = event {
                     this.target_choice = *choice;
                     this.options_changed(window, cx);
+                }
+            }),
+            cx.subscribe_in(&ui_language_select, window, |this, _, event, window, cx| {
+                if let SelectEvent::Confirm(Some(language)) = event {
+                    this.set_ui_language(*language, window, cx);
                 }
             }),
             cx.subscribe_in(&style_select, window, |this, _, event, window, cx| {
@@ -281,6 +293,7 @@ impl TranslatorView {
             source_select,
             target_select,
             style_select,
+            ui_language_select,
             source_choice,
             target_choice,
             style_choice,
@@ -540,6 +553,78 @@ impl TranslatorView {
             }
             ModelsEvent::ReviewLicense => self.open_license(false, window, cx),
         }
+    }
+
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let language = self.ui_language_select.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog
+                .title(t!("settings.title").into_owned())
+                .w(px(480.))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .text_sm()
+                        .child(
+                            div()
+                                .w(px(120.))
+                                .child(t!("settings.language").into_owned()),
+                        )
+                        .child(Select::new(&language).w(px(260.))),
+                )
+        });
+    }
+
+    fn set_ui_language(
+        &mut self,
+        language: UiLanguage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings.ui_language == language {
+            return;
+        }
+        self.settings.ui_language = language;
+        self.settings.save();
+        let locale = language.locale();
+        crate::app_log!("UI language set to {language:?} ({locale})");
+        rust_i18n::set_locale(locale);
+        self.refresh_locale(window, cx);
+    }
+
+    /// Rebuilds the strings that were baked into child components when they were created.
+    /// Everything else is translated at render time.
+    fn refresh_locale(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (source, target, style) = (self.source_choice, self.target_choice, self.style_choice);
+        self.source_select.update(cx, |state, cx| {
+            state.set_items(SearchableVec::new(lang::source_choices()), window, cx);
+            state.set_selected_value(&source, window, cx);
+        });
+        self.target_select.update(cx, |state, cx| {
+            state.set_items(SearchableVec::new(lang::target_choices()), window, cx);
+            state.set_selected_value(&target, window, cx);
+        });
+        self.style_select.update(cx, |state, cx| {
+            state.set_items(lang::style_choices(), window, cx);
+            state.set_selected_value(&style, window, cx);
+        });
+        let language = self.settings.ui_language;
+        self.ui_language_select.update(cx, |state, cx| {
+            state.set_items(lang::ui_language_choices(), window, cx);
+            state.set_selected_value(&language, window, cx);
+        });
+        for (input, key) in [
+            (&self.source, "source.placeholder"),
+            (&self.context_input, "options.context_placeholder"),
+            (&self.glossary_input, "options.glossary_placeholder"),
+        ] {
+            let text = t!(key).into_owned();
+            input.update(cx, |state, cx| state.set_placeholder(text, window, cx));
+        }
+        self.backend
+            .update(cx, |backend, cx| backend.refresh_locale(window, cx));
+        self.models.update(cx, |_, cx| cx.notify());
+        cx.notify();
     }
 
     fn open_models(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -873,25 +958,36 @@ impl Render for TranslatorView {
                 None => model.label(),
             },
         );
-        let title_bar = TitleBar::new().child(
-            h_flex()
-                .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .child(t!("app.title").into_owned()),
-                )
-                .child(
-                    Button::new("models")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::HardDrive)
-                        .label(model_button_label)
-                        .tooltip(t!("models.title").into_owned())
-                        .on_click(cx.listener(|this, _, window, cx| this.open_models(window, cx))),
-                ),
-        );
+        let title_bar = TitleBar::new()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(t!("app.title").into_owned()),
+                    )
+                    .child(
+                        Button::new("models")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::HardDrive)
+                            .label(model_button_label)
+                            .tooltip(t!("models.title").into_owned())
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_models(window, cx)),
+                            ),
+                    ),
+            )
+            .child(
+                Button::new("settings")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Settings)
+                    .tooltip(t!("settings.title").into_owned())
+                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
+            );
 
         let toolbar = h_flex()
             .px_3()

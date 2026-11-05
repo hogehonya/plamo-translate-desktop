@@ -30,20 +30,6 @@ fn custom_model() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// UI language: `PLAMO_LANG` if set, else the OS locale. Only `en` and `ja` are translated.
-fn ui_locale() -> &'static str {
-    let requested = std::env::var("PLAMO_LANG")
-        .ok()
-        .or_else(sys_locale::get_locale)
-        .unwrap_or_default()
-        .to_lowercase();
-    if requested.starts_with("ja") {
-        "ja"
-    } else {
-        "en"
-    }
-}
-
 fn main() {
     let custom_model = custom_model();
     applog::init(&settings::log_path());
@@ -55,7 +41,7 @@ fn main() {
     );
     let settings = settings::Settings::load();
     // Shared with gpui-component, so its built-in strings follow the same locale.
-    rust_i18n::set_locale(ui_locale());
+    rust_i18n::set_locale(settings.ui_language.locale());
 
     gpui_kit::application()
         .with_assets(assets::AppAssets)

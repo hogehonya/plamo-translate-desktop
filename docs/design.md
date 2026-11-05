@@ -259,7 +259,12 @@ The first implementation is `LlamaCppBackend`:
   A new translation starts at the top.
 - Japanese IME input must work on both platforms. This is checked in M0.
 - Theme follows the OS. Light and dark come from gpui-kit.
-- UI strings live in `locales/en.yml` and `locales/ja.yml`. The OS locale selects the language, and settings can override it.
+- UI strings live in `crates/app/locales/app.yml`. The language is the first that applies of:
+  1. `PLAMO_LANG` (a development override).
+  2. Settings → Display language (System, English, or 日本語).
+  3. The OS locale.
+- The change applies immediately. Components that baked strings in when they were created (select items, placeholders) are rebuilt,
+  and everything else is translated at render time.
 
 Future idea: a global hotkey that translates the clipboard (with the `global-hotkey` crate).
 

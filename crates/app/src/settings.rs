@@ -37,6 +37,53 @@ pub struct Settings {
     pub backend: BackendSettings,
     /// Glossary text, one `source = target` per line.
     pub glossary: String,
+    pub ui_language: UiLanguage,
+}
+
+/// Language of the user interface.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiLanguage {
+    /// Follow the operating system.
+    #[default]
+    System,
+    English,
+    Japanese,
+}
+
+impl UiLanguage {
+    /// The locale code to use. `PLAMO_LANG` overrides everything, for development.
+    pub fn locale(self) -> &'static str {
+        if let Some(code) = std::env::var("PLAMO_LANG")
+            .ok()
+            .and_then(|v| supported_locale(&v))
+        {
+            return code;
+        }
+        match self {
+            Self::English => "en",
+            Self::Japanese => "ja",
+            Self::System => system_locale(),
+        }
+    }
+}
+
+/// The OS language if the UI is translated into it, else English.
+pub fn system_locale() -> &'static str {
+    sys_locale::get_locale()
+        .and_then(|l| supported_locale(&l))
+        .unwrap_or("en")
+}
+
+fn supported_locale(requested: &str) -> Option<&'static str> {
+    let requested = requested.to_lowercase();
+    if requested.starts_with("ja") {
+        Some("ja")
+    } else if requested.starts_with("en") {
+        Some("en")
+    } else {
+        None
+    }
 }
 
 /// Where and how the model runs.
@@ -114,6 +161,9 @@ mod tests {
         assert_eq!(s.model.as_deref(), Some("x"));
         assert!(!s.license_accepted);
         assert_eq!(s.backend.n_ctx, 16384);
+        assert_eq!(s.ui_language, super::UiLanguage::System);
+        let s: Settings = serde_json::from_str(r#"{"ui_language":"japanese"}"#).unwrap();
+        assert_eq!(s.ui_language, super::UiLanguage::Japanese);
     }
 
     #[test]

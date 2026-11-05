@@ -5,6 +5,8 @@ use gpui_kit::SharedString;
 use gpui_kit::component::select::SelectItem;
 use rust_i18n::t;
 
+use crate::settings::UiLanguage;
+
 /// Source language choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceChoice {
@@ -154,6 +156,23 @@ pub fn target_choices() -> Vec<Choice<TargetChoice>> {
     );
     choices.push(Choice::language(TargetChoice::Lang(JA_EASY), JA_EASY));
     choices
+}
+
+/// UI language options. Languages are named in their own language.
+pub fn ui_language_choices() -> Vec<Choice<UiLanguage>> {
+    let system = match crate::settings::system_locale() {
+        "ja" => "日本語",
+        _ => "English",
+    };
+    vec![
+        Choice::new(
+            UiLanguage::System,
+            t!("settings.language_system", lang = system).into_owned(),
+            &[],
+        ),
+        Choice::new(UiLanguage::English, "English".to_owned(), &[]),
+        Choice::new(UiLanguage::Japanese, "日本語".to_owned(), &[]),
+    ]
 }
 
 pub fn style_choices() -> Vec<Choice<StyleChoice>> {

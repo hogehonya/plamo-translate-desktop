@@ -92,10 +92,7 @@ impl BackendPanel {
             )
         });
 
-        let context_choices: Vec<_> = CONTEXT_LENGTHS
-            .iter()
-            .map(|&n| Choice::new(n, t!("backend.tokens", count = n).into_owned(), &[]))
-            .collect();
+        let context_choices = context_choices();
         let selected = lang::position(&context_choices, &settings.n_ctx).map(IndexPath::new);
         let context_select = cx.new(|cx| SelectState::new(context_choices, selected, window, cx));
 
@@ -155,10 +152,29 @@ impl BackendPanel {
         cx.notify();
     }
 
+    /// Rebuilds the option labels after the UI language changed.
+    pub fn refresh_locale(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let devices = std::mem::take(&mut self.devices);
+        self.set_devices(devices, window, cx);
+        let context_choices = context_choices();
+        let n_ctx = self.settings.n_ctx;
+        self.context_select.update(cx, |state, cx| {
+            state.set_items(context_choices, window, cx);
+            state.set_selected_value(&n_ctx, window, cx);
+        });
+    }
+
     pub fn set_model_bytes(&mut self, bytes: Option<u64>, cx: &mut Context<Self>) {
         self.model_bytes = bytes;
         cx.notify();
     }
+}
+
+fn context_choices() -> Vec<Choice<u32>> {
+    CONTEXT_LENGTHS
+        .iter()
+        .map(|&n| Choice::new(n, t!("backend.tokens", count = n).into_owned(), &[]))
+        .collect()
 }
 
 fn device_choices(devices: &[Device]) -> Vec<Choice<DeviceSetting>> {

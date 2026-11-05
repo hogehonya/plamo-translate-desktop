@@ -13,7 +13,7 @@ locally on your computer. It works offline once a model is downloaded. Written i
 - Long texts are split into paragraphs and translated in order, with earlier pairs passed as history to keep wording consistent.
 - Built-in model manager: choose a model size and quantization (0.8B, 2B, 8B or 31B GGUF). The download resumes after an interruption and is verified with SHA-256.
 - Runs on the CPU or on a GPU through Vulkan (Windows builds). The device and the context length are selectable.
-- English and Japanese UI, following the OS language (set `PLAMO_LANG=ja` or `en` to override).
+- English and Japanese UI. It follows the OS language by default and can be changed under Settings (the gear in the title bar). `PLAMO_LANG=ja` or `en` overrides both.
 
 Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation.
 
