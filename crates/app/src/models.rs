@@ -109,7 +109,8 @@ impl ModelsPanel {
             DownloadEvent::Progress { entry, progress } => {
                 self.progress.insert(entry.id(), progress);
             }
-            DownloadEvent::Finished { entry, .. } => {
+            DownloadEvent::Finished { entry, path } => {
+                crate::app_log!("download finished: {}", path.display());
                 self.progress.remove(entry.id());
                 if self.use_when_done == Some(entry.id()) {
                     self.use_when_done = None;
@@ -117,9 +118,11 @@ impl ModelsPanel {
                 }
             }
             DownloadEvent::Cancelled { entry } => {
+                crate::app_log!("download cancelled: {}", entry.id());
                 self.progress.remove(entry.id());
             }
             DownloadEvent::Failed { entry, error } => {
+                crate::app_log!("download failed: {}: {error}", entry.id());
                 self.progress.remove(entry.id());
                 self.errors.insert(entry.id(), error);
             }
@@ -132,6 +135,11 @@ impl ModelsPanel {
             return;
         }
         self.errors.remove(entry.id());
+        crate::app_log!(
+            "download started: {} (local state {:?})",
+            entry.id(),
+            self.store().state(entry)
+        );
         let downloaded = match self.store().state(entry) {
             LocalState::Partial(n) => n,
             _ => 0,
@@ -188,7 +196,7 @@ impl ModelsPanel {
                         if this.active == Some(entry.id()) {
                             cx.emit(ModelsEvent::DeleteActive(entry));
                         } else {
-                            this.delete(entry, cx);
+                            this.delete(entry, "confirmed in the Models dialog", cx);
                         }
                     });
                     true
@@ -197,8 +205,14 @@ impl ModelsPanel {
     }
 
     /// Deletes the files of a model that is not loaded.
-    pub fn delete(&mut self, entry: &'static CatalogEntry, cx: &mut Context<Self>) {
+    pub fn delete(&mut self, entry: &'static CatalogEntry, reason: &str, cx: &mut Context<Self>) {
+        crate::app_log!(
+            "deleting model {} ({reason}): {}",
+            entry.id(),
+            self.store().path(entry).display()
+        );
         if let Err(e) = self.store().delete(entry) {
+            crate::app_log!("deleting {} failed: {e}", entry.id());
             self.errors.insert(entry.id(), e.to_string());
         } else {
             self.errors.remove(entry.id());

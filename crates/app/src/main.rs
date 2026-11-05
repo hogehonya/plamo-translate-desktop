@@ -5,6 +5,7 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod applog;
 mod assets;
 mod backend;
 mod glossary;
@@ -45,6 +46,13 @@ fn ui_locale() -> &'static str {
 
 fn main() {
     let custom_model = custom_model();
+    applog::init(&settings::log_path());
+    app_log!(
+        "starting {} {}; models in {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        settings::models_dir().display()
+    );
     let settings = settings::Settings::load();
     // Shared with gpui-component, so its built-in strings follow the same locale.
     rust_i18n::set_locale(ui_locale());

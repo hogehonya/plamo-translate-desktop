@@ -16,6 +16,13 @@ pub fn models_dir() -> PathBuf {
     )
 }
 
+/// The application log, next to the models.
+pub fn log_path() -> PathBuf {
+    models_dir()
+        .parent()
+        .map_or_else(|| PathBuf::from("app.log"), |dir| dir.join("app.log"))
+}
+
 fn settings_path() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("settings.json"))
 }

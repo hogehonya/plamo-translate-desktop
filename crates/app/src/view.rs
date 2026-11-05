@@ -425,6 +425,7 @@ impl TranslatorView {
 
     /// Releases the active model. The saved selection stays, so the next start loads it again.
     fn unload_model(&mut self, cx: &mut Context<Self>) {
+        crate::app_log!("unloading the active model");
         self.worker.unload();
         self.active_model = None;
         self.model_ready = false;
@@ -474,6 +475,12 @@ impl TranslatorView {
         };
         let device = backend::resolve(&self.settings.backend.device, devices);
         self.loaded_on = Some(backend::device_label(device));
+        crate::app_log!(
+            "loading {} on {} (n_ctx {})",
+            path.display(),
+            backend::device_label(device),
+            self.settings.backend.n_ctx
+        );
         self.worker.load(LoadRequest {
             path,
             model: backend::model_options(device),
@@ -702,9 +709,11 @@ impl TranslatorView {
             }
             Event::LoadProgress(p) => self.status = Status::Loading(p),
             Event::Unloaded => {
+                crate::app_log!("model released by the worker");
                 if let Some(entry) = self.pending_delete.take() {
-                    self.models
-                        .update(cx, |models, cx| models.delete(entry, cx));
+                    self.models.update(cx, |models, cx| {
+                        models.delete(entry, "the active model, after unloading", cx)
+                    });
                     if self.settings.model.as_deref() == Some(entry.id()) {
                         self.settings.model = None;
                         self.settings.save();
