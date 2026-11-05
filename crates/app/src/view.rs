@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use engine::StopReason;
-use engine::document::DocumentOptions;
 use engine::llama::{Device, RuntimeOptions, SessionOptions};
 use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use engine::pfml::{GlossaryEntry, LangCode, TranslationOptions};
@@ -72,29 +71,6 @@ fn display_row(state: &TextareaState, offset: usize) -> usize {
         .row
 }
 
-/// A duration for the status bar, such as `45 s`, `3 min 20 s`, or `1 h 05 min`.
-fn format_duration(d: Duration) -> String {
-    let secs = d.as_secs_f64().round() as u64;
-    if secs < 60 {
-        t!("time.seconds", s = secs).into_owned()
-    } else if secs < 3600 {
-        t!(
-            "time.minutes",
-            m = secs / 60,
-            s = format!("{:02}", secs % 60)
-        )
-        .into_owned()
-    } else {
-        let minutes = secs / 60;
-        t!(
-            "time.hours",
-            h = minutes / 60,
-            m = format!("{:02}", minutes % 60)
-        )
-        .into_owned()
-    }
-}
-
 /// `n` with thousands separators, such as `12,345`.
 fn group_digits(n: usize) -> String {
     let digits = n.to_string();
@@ -155,6 +131,7 @@ struct Cached {
     request: Request,
     translation: String,
     chunks: Vec<ChunkSpan>,
+    cuts: Vec<CutMark>,
 }
 
 /// A passage whose translation kept looping and was cut: the source sentence and what was kept
@@ -192,7 +169,6 @@ struct ChunkMark {
 #[derive(Debug, Clone, Copy)]
 struct SourceInfo {
     chars: usize,
-    is_empty: bool,
     looks_japanese: bool,
 }
 
@@ -200,7 +176,7 @@ struct SourceInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Request {
     options: TranslationOptions,
-    document: DocumentOptions,
+    document: DocumentSettings,
     text: String,
 }
 
@@ -240,7 +216,10 @@ enum Status {
         /// Passages whose output kept looping and was cut.
         cut: usize,
     },
-    Cached,
+    Cached {
+        /// Passages of the cached translation that were cut.
+        cut: usize,
+    },
     Stopped,
     Truncated,
     Error(String),
@@ -313,6 +292,14 @@ pub struct TranslatorView {
 
     /// Set by the paste hook so the following change translates without debouncing.
     paste_pending: bool,
+    /// Loads sent to the worker whose result has not arrived. Each load ends in exactly one
+    /// `Loaded` or `LoadFailed`; only the last one's events describe the model in use.
+    pending_loads: usize,
+    /// Set when llama.cpp could not start; nothing can load after that.
+    runtime_error: Option<String>,
+    /// The shown translation was stopped or failed part-way, so it neither satisfies a repeated
+    /// request nor goes into the cache.
+    shown_partial: bool,
     copied: bool,
     debounce: Task<()>,
     copied_reset: Task<()>,
@@ -328,8 +315,9 @@ impl TranslatorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Development aid: start with the contents of a file as the source text.
+        // Development aid (debug builds only): start with the contents of a file as the source.
         let initial_source = std::env::var_os("PLAMO_DEBUG_SOURCE")
+            .filter(|_| cfg!(debug_assertions))
             .and_then(|path| std::fs::read_to_string(path).ok())
             .unwrap_or_default();
         let source = cx.new(|cx| {
@@ -580,6 +568,9 @@ impl TranslatorView {
             job_started: None,
             current_chunk: None,
             paste_pending: false,
+            pending_loads: 0,
+            runtime_error: None,
+            shown_partial: false,
             copied: false,
             debounce: Task::ready(()),
             copied_reset: Task::ready(()),
@@ -746,6 +737,10 @@ impl TranslatorView {
         let bytes = std::fs::metadata(&path).ok().map(|m| m.len());
         self.backend
             .update(cx, |backend, cx| backend.set_model_bytes(bytes, cx));
+        if let Some(error) = &self.runtime_error {
+            self.status = Status::Error(error.clone());
+            return;
+        }
         let Some(devices) = &self.devices else {
             return;
         };
@@ -756,6 +751,7 @@ impl TranslatorView {
             path.display(),
             backend::device_label(device)
         );
+        self.pending_loads += 1;
         self.worker.load(LoadRequest {
             path,
             model: backend::model_options(device),
@@ -819,9 +815,10 @@ impl TranslatorView {
         let theme = self.theme_select.clone();
         let chunk = self.chunk_select.clone();
         let history = self.history_select.clone();
-        let muted = cx.theme().muted_foreground;
         let view = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, cx| {
+            // Read on every render: the theme can change from this dialog.
+            let muted = cx.theme().muted_foreground;
             let sync_scroll = view
                 .upgrade()
                 .is_some_and(|view| view.read(cx).settings.sync_scroll);
@@ -998,10 +995,13 @@ impl TranslatorView {
             InputEvent::Change => {
                 self.source_info = None;
                 self.source_version += 1;
-                if std::mem::take(&mut self.paste_pending) {
-                    self.translate_now(window, cx);
-                } else if self.auto_translate {
-                    self.schedule_translation(window, cx);
+                let pasted = std::mem::take(&mut self.paste_pending);
+                if self.auto_translate {
+                    if pasted {
+                        self.translate_now(window, cx);
+                    } else {
+                        self.schedule_translation(window, cx);
+                    }
                 }
                 // The character count and the style selector depend on the text.
                 cx.notify();
@@ -1035,8 +1035,8 @@ impl TranslatorView {
         });
     }
 
-    fn build_request(&self, text: String) -> Request {
-        let target = self.target_choice.resolve(&text);
+    fn build_request(&self, text: String, source_is_japanese: bool) -> Request {
+        let target = self.target_choice.resolve_for(source_is_japanese);
         let mut options = TranslationOptions::new(LangCode::new(target).expect("built-in code"));
         options.source = self
             .source_choice
@@ -1049,10 +1049,7 @@ impl TranslatorView {
         options.glossary = self.glossary.clone();
         Request {
             options,
-            document: self
-                .settings
-                .document
-                .options(t!("output.cut_marker").into_owned()),
+            document: self.settings.document,
             text,
         }
     }
@@ -1073,28 +1070,39 @@ impl TranslatorView {
             return;
         }
 
-        let request = self.build_request(text);
-        if self.shown.as_ref() == Some(&request) {
+        let source_is_japanese = self.source_info(cx).looks_japanese;
+        let request = self.build_request(text, source_is_japanese);
+        if self.shown.as_ref() == Some(&request) && !self.shown_partial {
             return;
         }
         if let Some(hit) = self.cache.iter().find(|c| c.request == request) {
-            let (hit, chunks) = (hit.translation.clone(), hit.chunks.clone());
+            let (hit, chunks, cuts) = (
+                hit.translation.clone(),
+                hit.chunks.clone(),
+                hit.cuts.clone(),
+            );
             self.worker.cancel();
             self.current_job = None;
             self.shown = Some(request);
             self.shown_version = self.source_version;
             self.set_translation(hit, window, cx);
             self.chunks = chunks;
-            self.status = Status::Cached;
+            self.status = Status::Cached { cut: cuts.len() };
+            self.cuts = cuts;
             cx.notify();
             return;
         }
 
-        let target = self.target_choice.resolve(&request.text);
+        let target = self.target_choice.resolve_for(source_is_japanese);
         self.set_translation(String::new(), window, cx);
+        // The marker is in the UI language, so it is chosen now rather than kept in the request
+        // (where it would make a cached result miss after a language change).
+        let document = request
+            .document
+            .options(t!("output.cut_marker").into_owned());
         self.current_job = Some(self.worker.translate(
             request.options.clone(),
-            request.document.clone(),
+            document,
             request.text.clone(),
         ));
         self.stream_tokens = 0;
@@ -1113,6 +1121,8 @@ impl TranslatorView {
     /// Replaces the output and scrolls it back to the top.
     fn set_translation(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.chunks.clear();
+        self.alignment = None;
+        self.shown_partial = false;
         self.cuts.clear();
         self.next_cut = 0;
         self.translation_utf16 = text.encode_utf16().count();
@@ -1176,7 +1186,6 @@ impl TranslatorView {
             let text = self.source.read(cx).value();
             SourceInfo {
                 chars: text.chars().count(),
-                is_empty: text.is_empty(),
                 looks_japanese: lang::looks_japanese(&text),
             }
         })
@@ -1187,7 +1196,7 @@ impl TranslatorView {
         if self.current_job.take().is_some() {
             self.worker.cancel();
             // The partial result must not satisfy a later identical request.
-            self.shown = None;
+            self.shown_partial = true;
             self.status = Status::Stopped;
             cx.notify();
         }
@@ -1251,7 +1260,9 @@ impl TranslatorView {
                     self.start_load(cx);
                 }
             }
-            Event::LoadProgress(p) => self.status = Status::Loading(p),
+            // Progress of a load that a newer one already replaces says nothing.
+            Event::LoadProgress(p) if self.pending_loads <= 1 => self.status = Status::Loading(p),
+            Event::LoadProgress(_) => return,
             Event::Unloaded => {
                 crate::app_log!("model released by the worker");
                 if let Some(entry) = self.pending_delete.take() {
@@ -1264,12 +1275,32 @@ impl TranslatorView {
                     }
                 }
             }
+            Event::Loaded(_) | Event::LoadFailed(_) if self.pending_loads > 1 => {
+                // A newer load follows.
+                self.pending_loads -= 1;
+                return;
+            }
             Event::Loaded(_) => {
+                self.pending_loads = 0;
+                // Unloaded while loading: the worker releases it next.
+                if self.active_model.is_none() {
+                    return;
+                }
                 self.model_ready = true;
                 self.status = Status::Ready;
                 self.translate_now(window, cx);
             }
-            Event::LoadFailed(e) | Event::RuntimeFailed(e) => self.status = Status::Error(e),
+            Event::LoadFailed(e) => {
+                self.pending_loads = 0;
+                self.status = Status::Error(e);
+            }
+            Event::RuntimeFailed(e) => {
+                crate::app_log!("inference runtime failed: {e}");
+                self.runtime_error = Some(e.clone());
+                self.model_ready = false;
+                self.current_job = None;
+                self.status = Status::Error(e);
+            }
             Event::Chunk {
                 job,
                 index,
@@ -1288,9 +1319,6 @@ impl TranslatorView {
                     source: start..end,
                     output_start: self.translation.len(),
                 });
-            }
-            Event::Token { job, text } if is_current(job) => {
-                self.append_translation(&text, window, cx);
             }
             Event::Rewind { job, len } if is_current(job) => {
                 self.rewind_translation(len, window, cx);
@@ -1335,6 +1363,7 @@ impl TranslatorView {
                                 request,
                                 translation: self.translation.clone(),
                                 chunks: self.chunks.clone(),
+                                cuts: self.cuts.clone(),
                             });
                         }
                         Status::Done {
@@ -1355,7 +1384,7 @@ impl TranslatorView {
             }
             Event::Failed { job, error } if is_current(job) => {
                 self.current_job = None;
-                self.shown = None;
+                self.shown_partial = true;
                 self.status = Status::Error(error);
             }
             // Output of superseded jobs.
@@ -1543,10 +1572,12 @@ impl TranslatorView {
     }
 
     fn can_swap(&self) -> bool {
-        matches!(
-            (self.source_choice, self.target_choice),
-            (SourceChoice::Lang(_), TargetChoice::Lang(_)) | (_, TargetChoice::JapaneseEnglish)
-        )
+        // While translating, the output is still partial.
+        self.current_job.is_none()
+            && matches!(
+                (self.source_choice, self.target_choice),
+                (SourceChoice::Lang(_), TargetChoice::Lang(_)) | (_, TargetChoice::JapaneseEnglish)
+            )
     }
 
     /// Swaps the languages (when both are explicit) and moves the translation into the source.
@@ -1614,7 +1645,8 @@ impl TranslatorView {
         let chunk = self.current_chunk?;
         let total = self.shown.as_ref()?.text.len();
         let elapsed = self.job_started?.elapsed().as_secs_f64();
-        if chunk.start == 0 || total == 0 || elapsed < 1.0 {
+        // Nothing to go by before a chunk has been translated.
+        if chunk.tokens_before == 0 || chunk.start == 0 || total == 0 || elapsed < 1.0 {
             return None;
         }
         let tokens_per_byte = chunk.tokens_before as f64 / chunk.start as f64;
@@ -1657,7 +1689,7 @@ impl TranslatorView {
                     text.push_str(&format!(" · {rate:.1} tok/s"));
                 }
                 if let Some(eta) = self.remaining_time() {
-                    let eta = t!("status.remaining", time = format_duration(eta));
+                    let eta = t!("status.remaining", time = lang::format_duration(eta));
                     text.push_str(&format!(" · {eta}"));
                 }
                 text
@@ -1670,7 +1702,7 @@ impl TranslatorView {
             } => {
                 let speed = format!("{tokens_per_second:.1}");
                 let tokens = group_digits(*tokens);
-                let time = format_duration(*elapsed);
+                let time = lang::format_duration(*elapsed);
                 if *cut > 0 {
                     t!(
                         "status.done_cut",
@@ -1684,7 +1716,8 @@ impl TranslatorView {
                     t!("status.done", tokens = tokens, speed = speed, time = time).into_owned()
                 }
             }
-            Status::Cached => t!("status.cached").into_owned(),
+            Status::Cached { cut: 0 } => t!("status.cached").into_owned(),
+            Status::Cached { cut } => t!("status.cached_cut", count = cut).into_owned(),
             Status::Stopped => t!("status.stopped").into_owned(),
             Status::Truncated => t!("status.truncated").into_owned(),
             Status::Error(message) => t!("status.error", message = message).into_owned(),
@@ -1729,10 +1762,7 @@ impl Render for TranslatorView {
                     button.ghost()
                 }
             })
-            .on_click(cx.listener(|this, _, window, cx| {
-                crate::app_log!("Models button clicked");
-                this.open_models(window, cx)
-            }));
+            .on_click(cx.listener(|this, _, window, cx| this.open_models(window, cx)));
         let settings_button = Button::new("settings")
             .ghost()
             .xsmall()
@@ -1791,6 +1821,8 @@ impl Render for TranslatorView {
                         this.auto_translate = *checked;
                         if this.auto_translate {
                             this.translate_now(window, cx);
+                        } else {
+                            this.debounce = Task::ready(());
                         }
                         cx.notify();
                     })),
@@ -1835,7 +1867,7 @@ impl Render for TranslatorView {
                             .xsmall()
                             .icon(IconName::Close)
                             .label(t!("action.clear").into_owned())
-                            .disabled(source.is_empty)
+                            .disabled(source.chars == 0)
                             .on_click(cx.listener(|this, _, window, cx| this.clear(window, cx))),
                     ),
             );
@@ -1883,7 +1915,7 @@ impl Render for TranslatorView {
                     .min_w_0()
                     .child(self.status_text())
                     .when(
-                        matches!(self.status, Status::Done { cut, .. } if cut > 0)
+                        matches!(self.status, Status::Done { .. } | Status::Cached { .. })
                             && !self.cuts.is_empty(),
                         |this| {
                             this.cursor_pointer()

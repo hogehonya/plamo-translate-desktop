@@ -164,12 +164,13 @@ fn device_choices(devices: &[Device]) -> Vec<Choice<DeviceSetting>> {
             .map(|d| {
                 Choice::new(
                     DeviceSetting::Device(d.name.clone()),
-                    format!(
-                        "{} — {} ({} free)",
-                        d.name,
-                        d.description,
-                        format_bytes(d.memory_free)
-                    ),
+                    t!(
+                        "backend.device_choice",
+                        name = d.name,
+                        description = d.description,
+                        free = format_bytes(d.memory_free)
+                    )
+                    .into_owned(),
                     &[],
                 )
             }),

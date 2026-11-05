@@ -12,7 +12,12 @@ pub fn parse(text: &str) -> Vec<GlossaryEntry> {
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| {
-            let (source, target) = SEPARATORS.iter().find_map(|sep| line.split_once(sep))?;
+            // The first separator in the line, preferring `=>` to `=` at the same place.
+            let (at, sep) = SEPARATORS
+                .iter()
+                .filter_map(|sep| line.find(sep).map(|at| (at, sep)))
+                .min_by_key(|&(at, sep)| (at, std::cmp::Reverse(sep.len())))?;
+            let (source, target) = (&line[..at], &line[at + sep.len()..]);
             let (source, target) = (source.trim(), target.trim());
             (!source.is_empty() && !target.is_empty()).then(|| GlossaryEntry {
                 source: source.to_owned(),
@@ -56,5 +61,9 @@ mod tests {
     #[test]
     fn splits_at_the_first_separator() {
         assert_eq!(pairs("a = b = c"), [("a".into(), "b = c".into())]);
+        // The earliest separator wins, whichever kind it is.
+        assert_eq!(pairs("a = b => c"), [("a".into(), "b => c".into())]);
+        assert_eq!(pairs("矢印 = →"), [("矢印".into(), "→".into())]);
+        assert_eq!(pairs("x => y"), [("x".into(), "y".into())]);
     }
 }

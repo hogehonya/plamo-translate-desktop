@@ -1,4 +1,7 @@
-//! Language and style choices offered in the toolbar.
+//! Choices offered in selects (languages, style, UI language, theme, token counts) and
+//! localized formatting helpers.
+
+use std::time::Duration;
 
 use engine::pfml::{Form, JA_EASY, LANGUAGES, find_language};
 use gpui_kit::SharedString;
@@ -33,12 +36,7 @@ pub enum TargetChoice {
 }
 
 impl TargetChoice {
-    /// The concrete target language for `text`.
-    pub fn resolve(self, text: &str) -> &'static str {
-        self.resolve_for(looks_japanese(text))
-    }
-
-    /// [`Self::resolve`] for a text where [`looks_japanese`] is already known.
+    /// The concrete target language for a source text, given whether it [`looks_japanese`].
     pub fn resolve_for(self, source_is_japanese: bool) -> &'static str {
         match self {
             Self::Lang(code) => code,
@@ -86,7 +84,7 @@ pub fn language_name(code: &str) -> String {
     }
 }
 
-/// An entry in a language or style select.
+/// An entry in a select.
 #[derive(Debug, Clone)]
 pub struct Choice<V> {
     value: V,
@@ -241,6 +239,29 @@ pub fn position<V: PartialEq>(choices: &[Choice<V>], value: &V) -> Option<usize>
     choices.iter().position(|c| &c.value == value)
 }
 
+/// A duration such as `45 s`, `3 min 20 s`, or `1 h 05 min`.
+pub fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs_f64().round() as u64;
+    if secs < 60 {
+        t!("time.seconds", s = secs).into_owned()
+    } else if secs < 3600 {
+        t!(
+            "time.minutes",
+            m = secs / 60,
+            s = format!("{:02}", secs % 60)
+        )
+        .into_owned()
+    } else {
+        let minutes = secs / 60;
+        t!(
+            "time.hours",
+            h = minutes / 60,
+            m = format!("{:02}", minutes % 60)
+        )
+        .into_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,11 +276,31 @@ mod tests {
     }
 
     #[test]
+    fn formats_durations() {
+        rust_i18n::set_locale("en");
+        assert_eq!(format_duration(Duration::from_secs(45)), "45 s");
+        assert_eq!(format_duration(Duration::from_secs(75)), "1 min 15 s");
+        assert_eq!(format_duration(Duration::from_secs(3725)), "1 h 02 min");
+    }
+
+    #[test]
     fn japanese_english_pair() {
-        assert_eq!(TargetChoice::JapaneseEnglish.resolve("こんにちは"), "en");
-        assert_eq!(TargetChoice::JapaneseEnglish.resolve("Hello"), "ja");
-        assert_eq!(TargetChoice::JapaneseEnglish.resolve("你好"), "ja");
-        assert_eq!(TargetChoice::Lang("fr").resolve("こんにちは"), "fr");
+        assert_eq!(
+            TargetChoice::JapaneseEnglish.resolve_for(looks_japanese("こんにちは")),
+            "en"
+        );
+        assert_eq!(
+            TargetChoice::JapaneseEnglish.resolve_for(looks_japanese("Hello")),
+            "ja"
+        );
+        assert_eq!(
+            TargetChoice::JapaneseEnglish.resolve_for(looks_japanese("你好")),
+            "ja"
+        );
+        assert_eq!(
+            TargetChoice::Lang("fr").resolve_for(looks_japanese("こんにちは")),
+            "fr"
+        );
     }
 
     #[test]

@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use engine::discovery;
 use engine::download::{DownloadEvent, Downloads, Progress};
@@ -707,7 +706,7 @@ fn progress_text(p: &Progress) -> String {
         text.push_str(&format!(" · {}/s", format_bytes(p.bytes_per_second as u64)));
     }
     if let Some(eta) = p.eta() {
-        text.push_str(&format!(" · {}", format_duration(eta)));
+        text.push_str(&format!(" · {}", crate::lang::format_duration(eta)));
     }
     text
 }
@@ -723,26 +722,13 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn format_duration(d: Duration) -> String {
-    let secs = d.as_secs();
-    if secs >= 3600 {
-        format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
-    } else {
-        format!("{}:{:02}", secs / 60, secs % 60)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use super::{format_bytes, format_duration};
+    use super::format_bytes;
 
     #[test]
     fn formatting() {
         assert_eq!(format_bytes(1_807_192_480), "1.81 GB");
         assert_eq!(format_bytes(573_116_288), "573 MB");
-        assert_eq!(format_duration(Duration::from_secs(75)), "1:15");
-        assert_eq!(format_duration(Duration::from_secs(3725)), "1:02:05");
     }
 }

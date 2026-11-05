@@ -77,7 +77,8 @@ impl Runtime {
             .map(|d| Device {
                 index: d.index,
                 name: d.name,
-                description: d.description,
+                // CPU names come padded with spaces.
+                description: d.description.trim().to_owned(),
                 backend: d.backend,
                 memory_total: d.memory_total as u64,
                 memory_free: d.memory_free as u64,

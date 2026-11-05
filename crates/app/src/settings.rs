@@ -185,17 +185,30 @@ pub enum DeviceSetting {
 
 impl Settings {
     /// Loads the settings, falling back to defaults if the file is missing or unreadable.
+    ///
+    /// A file that does not parse is renamed to `settings.json.invalid` rather than overwritten
+    /// by the next save, so the license acceptance and the glossary in it can be recovered.
     pub fn load() -> Self {
         let Some(path) = settings_path() else {
             return Self::default();
         };
-        match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                eprintln!("ignoring invalid settings in {}: {e}", path.display());
-                Self::default()
-            }),
-            Err(_) => Self::default(),
-        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
+        serde_json::from_str(&text).unwrap_or_else(|e| {
+            let aside = path.with_extension("json.invalid");
+            let moved = std::fs::rename(&path, &aside).is_ok();
+            crate::app_log!(
+                "ignoring invalid settings in {}: {e}{}",
+                path.display(),
+                if moved {
+                    format!("; kept as {}", aside.display())
+                } else {
+                    String::new()
+                }
+            );
+            Self::default()
+        })
     }
 
     /// Saves the settings atomically. Failures are reported but not fatal.
@@ -212,7 +225,7 @@ impl Settings {
             std::fs::rename(&tmp, &path)
         })();
         if let Err(e) = result {
-            eprintln!("failed to save settings to {}: {e}", path.display());
+            crate::app_log!("failed to save settings to {}: {e}", path.display());
         }
     }
 }

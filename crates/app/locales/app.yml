@@ -106,6 +106,9 @@ time.hours:
 status.cached:
   en: Done (cached)
   ja: 完了（キャッシュ）
+status.cached_cut:
+  en: "Done (cached) · %{count} passage(s) kept repeating and were cut (click to show)"
+  ja: "完了（キャッシュ） · 繰り返しが止まらなかった %{count} か所を打ち切りました（クリックで表示）"
 status.stopped:
   en: Translation stopped
   ja: 翻訳を中止しました
@@ -138,6 +141,9 @@ backend.auto:
 backend.cpu:
   en: CPU only
   ja: CPU のみ
+backend.device_choice:
+  en: "%{name} — %{description} (%{free} free)"
+  ja: "%{name} — %{description}（空き %{free}）"
 backend.memory_warning:
   en: "This model may not fit on %{device}: it needs about %{required}, and %{available} is free."
   ja: "このモデルは %{device} に収まらない可能性があります（必要量 約 %{required}、空き %{available}）。"

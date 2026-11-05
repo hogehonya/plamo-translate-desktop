@@ -2,9 +2,10 @@
 //!
 //! Lines go to stderr and to `app.log` in the data directory, so unexpected changes (a model
 //! file disappearing, for example) can be traced after the fact. Only a few lines are written
-//! per run (start-up, devices, model loads, downloads and deletions; never translated text), and
-//! a log over [`MAX_SIZE`] is moved to `app.log.1` at start-up, so at most two files of about
-//! that size exist.
+//! per run: start-up, devices, model loads, downloads, deletions, settings changes, catalog
+//! checks, and long-text retries and cuts (positions only; never translated text). A log over
+//! [`MAX_SIZE`] is moved to `app.log.1` at start-up, so at most two files of about that size
+//! exist.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
