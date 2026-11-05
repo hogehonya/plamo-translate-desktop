@@ -200,7 +200,14 @@ The first implementation is `LlamaCppBackend`:
   - A paste (a large input change) translates immediately. Typing is debounced by about 600 ms.
   - Editing the input cancels the running job and starts a new one.
   - Results are cached by (input, settings), so swapping languages back and forth costs nothing.
-- The source pane has focus at startup. `Ctrl+Shift+C` copies the translation.
+- The source pane has focus at startup. `Ctrl+Shift+C` copies the translation, and `Ctrl+Enter` translates immediately.
+- Languages:
+  - The default source is "Detect language".
+  - The default target is "Japanese ⇄ English (auto)": text with kana goes to English, and everything else goes to Japanese.
+    Kanji alone does not count, because it may be Chinese.
+  - Swapping exchanges explicit languages and moves the translation into the source pane.
+- The title bar is drawn by the app (gpui-kit `TitleBar`) on every platform.
+  Wayland compositors such as WSLg and GNOME do not draw server-side decorations.
 - Translation options:
   - Style (plain or polite) is shown only for a Japanese target.
   - Context is a separate textarea.

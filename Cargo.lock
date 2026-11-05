@@ -4730,6 +4730,8 @@ dependencies = [
  "directories",
  "engine",
  "gpui-kit",
+ "rust-i18n",
+ "sys-locale",
 ]
 
 [[package]]

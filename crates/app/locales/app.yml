@@ -1,0 +1,240 @@
+_version: 2
+
+app.title:
+  en: PLaMo Translate
+  ja: PLaMo Translate
+
+source.placeholder:
+  en: Type or paste text to translate
+  ja: 翻訳するテキストを入力または貼り付け
+source.detect:
+  en: Detect language
+  ja: 言語を自動検出
+source.chars:
+  en: "%{count} characters"
+  ja: "%{count} 文字"
+target.ja_en:
+  en: Japanese ⇄ English (auto)
+  ja: 日本語 ⇄ 英語（自動）
+style.default:
+  en: Default style
+  ja: 文体：指定なし
+style.polite:
+  en: Polite (desu/masu)
+  ja: 敬体（です・ます）
+style.plain:
+  en: Plain (da/dearu)
+  ja: 常体（だ・である）
+search.language:
+  en: Search languages
+  ja: 言語を検索
+
+action.translate:
+  en: Translate
+  ja: 翻訳
+action.swap:
+  en: Swap languages
+  ja: 言語を入れ替え
+action.copy:
+  en: Copy
+  ja: コピー
+action.copied:
+  en: Copied
+  ja: コピーしました
+action.clear:
+  en: Clear
+  ja: クリア
+action.auto_translate:
+  en: Auto
+  ja: 自動翻訳
+
+status.loading:
+  en: "Loading model… %{percent}%"
+  ja: "モデルを読み込み中… %{percent}%"
+status.ready:
+  en: Ready
+  ja: 準備完了
+status.translating:
+  en: "Translating into %{lang}…"
+  ja: "%{lang}に翻訳中…"
+status.done:
+  en: "Done · %{speed} tok/s"
+  ja: "完了 · %{speed} tok/s"
+status.cached:
+  en: Done (cached)
+  ja: 完了（キャッシュ）
+status.cancelled:
+  en: Cancelled
+  ja: キャンセルしました
+status.truncated:
+  en: The text is too long; the translation was cut off
+  ja: テキストが長すぎるため、翻訳が途中で切れました
+status.error:
+  en: "Error: %{message}"
+  ja: "エラー: %{message}"
+status.model_missing:
+  en: "Model file not found: %{path}"
+  ja: "モデルファイルが見つかりません: %{path}"
+
+lang.ja:
+  en: Japanese
+  ja: 日本語
+lang.ja_easy:
+  en: Easy Japanese (experimental)
+  ja: やさしい日本語（実験的）
+lang.en:
+  en: English
+  ja: 英語
+lang.zh_hans:
+  en: Chinese (Simplified)
+  ja: 中国語（簡体字）
+lang.zh_hant:
+  en: Chinese (Traditional)
+  ja: 中国語（繁体字）
+lang.ko:
+  en: Korean
+  ja: 韓国語
+lang.ar:
+  en: Arabic
+  ja: アラビア語
+lang.az:
+  en: Azerbaijani
+  ja: アゼルバイジャン語
+lang.be:
+  en: Belarusian
+  ja: ベラルーシ語
+lang.bg:
+  en: Bulgarian
+  ja: ブルガリア語
+lang.bn:
+  en: Bengali
+  ja: ベンガル語
+lang.ca:
+  en: Catalan
+  ja: カタルーニャ語
+lang.ceb:
+  en: Cebuano
+  ja: セブアノ語
+lang.de:
+  en: German
+  ja: ドイツ語
+lang.es:
+  en: Spanish
+  ja: スペイン語
+lang.et:
+  en: Estonian
+  ja: エストニア語
+lang.eu:
+  en: Basque
+  ja: バスク語
+lang.fa:
+  en: Persian
+  ja: ペルシア語
+lang.fr:
+  en: French
+  ja: フランス語
+lang.gu:
+  en: Gujarati
+  ja: グジャラート語
+lang.he:
+  en: Hebrew
+  ja: ヘブライ語
+lang.hi:
+  en: Hindi
+  ja: ヒンディー語
+lang.hr:
+  en: Croatian
+  ja: クロアチア語
+lang.hu:
+  en: Hungarian
+  ja: ハンガリー語
+lang.hy:
+  en: Armenian
+  ja: アルメニア語
+lang.id:
+  en: Indonesian
+  ja: インドネシア語
+lang.it:
+  en: Italian
+  ja: イタリア語
+lang.jv:
+  en: Javanese
+  ja: ジャワ語
+lang.ka:
+  en: Georgian
+  ja: ジョージア語
+lang.kk:
+  en: Kazakh
+  ja: カザフ語
+lang.km:
+  en: Khmer
+  ja: クメール語
+lang.lt:
+  en: Lithuanian
+  ja: リトアニア語
+lang.lv:
+  en: Latvian
+  ja: ラトビア語
+lang.ml:
+  en: Malayalam
+  ja: マラヤーラム語
+lang.mr:
+  en: Marathi
+  ja: マラーティー語
+lang.ms:
+  en: Malay
+  ja: マレー語
+lang.my:
+  en: Burmese
+  ja: ビルマ語
+lang.ne:
+  en: Nepali
+  ja: ネパール語
+lang.nl:
+  en: Dutch
+  ja: オランダ語
+lang.pa:
+  en: Punjabi
+  ja: パンジャブ語
+lang.pl:
+  en: Polish
+  ja: ポーランド語
+lang.ru:
+  en: Russian
+  ja: ロシア語
+lang.si:
+  en: Sinhala
+  ja: シンハラ語
+lang.sk:
+  en: Slovak
+  ja: スロバキア語
+lang.sl:
+  en: Slovenian
+  ja: スロベニア語
+lang.sr:
+  en: Serbian
+  ja: セルビア語
+lang.sw:
+  en: Swahili
+  ja: スワヒリ語
+lang.ta:
+  en: Tamil
+  ja: タミル語
+lang.te:
+  en: Telugu
+  ja: テルグ語
+lang.th:
+  en: Thai
+  ja: タイ語
+lang.tl:
+  en: Tagalog
+  ja: タガログ語
+lang.ur:
+  en: Urdu
+  ja: ウルドゥー語
+lang.uz:
+  en: Uzbek
+  ja: ウズベク語
+lang.vi:
+  en: Vietnamese
+  ja: ベトナム語
