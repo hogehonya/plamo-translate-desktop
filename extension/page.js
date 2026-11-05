@@ -183,6 +183,9 @@
     const first = run[0];
     if (!first?.isConnected) return;
     const fragment = rebuild(text, elements);
+    // Text left as it was (names, code, text already in the target language) is not repeated
+    // below the original, nor replaced by itself.
+    if (fragment.textContent.replace(/\s+/g, " ").trim() === runText(run)) return;
     if (mode === "below") {
       const box = document.createElement("span");
       box.setAttribute("data-plamo", "");
