@@ -82,6 +82,7 @@ The host uses the model and device selected in the app unless you choose others 
 (any downloaded model; downloads stay in the app). It loads its own copy of the model, so with the app open as well the model is in memory twice.
 It ends, freeing the memory, after 5 minutes without use or when you choose **Release** in the panel; the next translation starts it again.
 To update the app in place, release it and close the app first (the host keeps its files open). If you move the app's folder, choose Connect again.
+**Disconnect** in the same section removes the registration from the browsers (on Windows, from the registry); do this before deleting the app.
 Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
 
 ## Building from source

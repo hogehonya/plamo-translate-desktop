@@ -123,23 +123,34 @@ fn browser_settings(
         browser::Registration::Elsewhere(path) => Some(path.display().to_string()),
         _ => None,
     };
-    let registered = registration == browser::Registration::Registered;
-    let action = match registration {
-        browser::Registration::Registered => t!("settings.browser_unregister"),
-        browser::Registration::Elsewhere(_) => t!("settings.browser_reconnect"),
-        browser::Registration::NotRegistered => t!("settings.browser_register"),
-    };
-    let toggle = {
+    // Connect while this copy is not the one registered (it needs the host next to it);
+    // disconnect whenever any registration exists, even one of a copy that is gone.
+    let connect = match registration {
+        browser::Registration::Registered => None,
+        browser::Registration::Elsewhere(_) => Some(t!("settings.browser_reconnect")),
+        browser::Registration::NotRegistered => Some(t!("settings.browser_register")),
+    }
+    .map(|label| {
         let view = view.clone();
         Button::new("browser-register")
             .small()
-            .label(action.into_owned())
+            .label(label.into_owned())
             .disabled(host.is_none())
             .on_click(move |_, window, cx| {
-                let _ = view.update(cx, |this, _| this.set_browser_registration(!registered));
+                let _ = view.update(cx, |this, _| this.set_browser_registration(true));
                 window.refresh();
             })
-    };
+    });
+    let disconnect = (registration != browser::Registration::NotRegistered).then(|| {
+        let view = view.clone();
+        Button::new("browser-unregister")
+            .small()
+            .label(t!("settings.browser_unregister").into_owned())
+            .on_click(move |_, window, cx| {
+                let _ = view.update(cx, |this, _| this.set_browser_registration(false));
+                window.refresh();
+            })
+    });
     let open_folder = browser::extension_dir().map(|dir| {
         Button::new("browser-folder")
             .small()
@@ -161,7 +172,8 @@ fn browser_settings(
                         .child(t!("settings.browser").into_owned()),
                 )
                 .child(div().flex_1().min_w_0().child(status))
-                .child(div().flex_none().child(toggle))
+                .children(connect.map(|button| div().flex_none().child(button)))
+                .children(disconnect.map(|button| div().flex_none().child(button)))
                 .children(open_folder.map(|button| div().flex_none().child(button))),
         )
         .children(elsewhere.map(|path| div().text_xs().text_color(muted).min_w_0().child(path)))

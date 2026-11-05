@@ -446,8 +446,8 @@ settings.browser_error:
   en: "Could not change the connection: %{message}"
   ja: "連携を変更できませんでした: %{message}"
 settings.browser_note:
-  en: "Connecting lets the PLaMo Translate extension translate in the browser with the model selected here. To install the extension, open chrome://extensions (or edge://extensions), turn on Developer mode, choose \"Load unpacked\", and select the extension folder."
-  ja: "連携すると、ブラウザの PLaMo Translate 拡張機能が、ここで選んだモデルで翻訳できるようになります。拡張機能は、chrome://extensions（Edge なら edge://extensions）を開いてデベロッパー モードをオンにし、「パッケージ化されていない拡張機能を読み込む」で拡張機能のフォルダを選ぶと入ります。"
+  en: "Connecting lets the PLaMo Translate extension translate in the browser with the model selected here. To install the extension, open chrome://extensions (or edge://extensions), turn on Developer mode, choose \"Load unpacked\", and select the extension folder. Disconnect removes the registration from the browsers (on Windows, from the registry); do this before deleting the app."
+  ja: "連携すると、ブラウザの PLaMo Translate 拡張機能が、ここで選んだモデルで翻訳できるようになります。拡張機能は、chrome://extensions（Edge なら edge://extensions）を開いてデベロッパー モードをオンにし、「パッケージ化されていない拡張機能を読み込む」で拡張機能のフォルダを選ぶと入ります。「連携を解除」を押すと、ブラウザへの登録（Windows ではレジストリの登録）を消します。アプリを削除する前に解除してください。"
 settings.sync_scroll_note:
   en: "Scrolling one pane scrolls the other to the same place. Moving the caret in one pane selects the corresponding paragraph in the other."
   ja: "片方をスクロールすると、もう片方も同じ箇所までスクロールします。片方でカーソルを動かすと、もう片方で対応する段落を選択します。"
