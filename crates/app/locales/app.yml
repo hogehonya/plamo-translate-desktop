@@ -89,8 +89,8 @@ status.done:
   en: "Done in %{time} · %{tokens} tokens · %{speed} tok/s"
   ja: "完了（%{time}） · %{tokens} トークン · %{speed} tok/s"
 status.done_cut:
-  en: "Done in %{time} · %{tokens} tokens · %{speed} tok/s · %{count} passage(s) kept repeating and were cut"
-  ja: "完了（%{time}） · %{tokens} トークン · %{speed} tok/s · 繰り返しが止まらなかった %{count} か所を打ち切りました"
+  en: "Done in %{time} · %{tokens} tokens · %{speed} tok/s · %{count} passage(s) kept repeating and were cut (click to show)"
+  ja: "完了（%{time}） · %{tokens} トークン · %{speed} tok/s · 繰り返しが止まらなかった %{count} か所を打ち切りました（クリックで表示）"
 time.seconds:
   en: "%{s} s"
   ja: "%{s} 秒"

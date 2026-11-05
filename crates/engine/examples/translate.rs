@@ -253,9 +253,15 @@ fn main() -> anyhow::Result<()> {
                 "[chunk {}: {reason:?}, retrying in {pieces} pieces]",
                 index + 1
             ),
-            Progress::Cut { index, reason } => {
-                eprintln!("[chunk {}: {reason:?} again, output cut]", index + 1)
-            }
+            Progress::Cut {
+                index,
+                reason,
+                source: (start, end),
+                ..
+            } => eprintln!(
+                "[chunk {}: {reason:?} again, output cut; source bytes {start}..{end}]",
+                index + 1
+            ),
         },
         &|| false,
     )?;

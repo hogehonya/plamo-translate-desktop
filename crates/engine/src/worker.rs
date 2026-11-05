@@ -74,11 +74,14 @@ pub enum Event {
         index: usize,
         reason: StopReason,
     },
-    /// Output for a sentence of chunk `index` kept running away and was cut.
+    /// Output for a sentence of chunk `index` kept running away and was cut. `source` is the
+    /// sentence's byte range in the text, and `output` what was kept of its translation.
     Cut {
         job: JobId,
         index: usize,
         reason: StopReason,
+        source: (usize, usize),
+        output: (usize, usize),
     },
     Finished {
         job: JobId,
@@ -285,7 +288,18 @@ fn serve(
                 Progress::Retry { index, reason, .. } => {
                     events(Event::Retry { job, index, reason })
                 }
-                Progress::Cut { index, reason } => events(Event::Cut { job, index, reason }),
+                Progress::Cut {
+                    index,
+                    reason,
+                    source,
+                    output,
+                } => events(Event::Cut {
+                    job,
+                    index,
+                    reason,
+                    source,
+                    output,
+                }),
             },
             &|| latest.load(Ordering::Relaxed) != job,
         );

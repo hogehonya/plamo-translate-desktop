@@ -67,8 +67,14 @@ pub enum Progress {
         pieces: usize,
     },
     /// The output for a sentence of chunk `index` ran away even with repetition penalized, and
-    /// was cut.
-    Cut { index: usize, reason: StopReason },
+    /// was cut. `source` is the sentence's byte range in the text, and `output` the range of
+    /// what was kept of its translation in the output.
+    Cut {
+        index: usize,
+        reason: StopReason,
+        source: (usize, usize),
+        output: (usize, usize),
+    },
 }
 
 /// Size of the pieces a chunk is translated in again after its output ran away. Small enough
@@ -386,6 +392,7 @@ pub fn translate_document(
 
     let split = split(text, chunk_budget, count_tokens);
     let mut translator = Translator {
+        text,
         backend,
         count_tokens,
         options,
@@ -430,6 +437,8 @@ pub fn translate_document(
 }
 
 struct Translator<'a> {
+    /// The whole text; every piece translated is a slice of it.
+    text: &'a str,
     backend: &'a mut dyn TranslationBackend,
     count_tokens: &'a dyn Fn(&str) -> usize,
     options: &'a TranslationOptions,
@@ -577,7 +586,13 @@ impl Translator<'_> {
             StopReason::LengthLimit | StopReason::Incomplete => {}
         }
         self.total.cut += 1;
-        (self.on_progress)(Progress::Cut { index, reason });
+        let source_start = text.as_ptr() as usize - self.text.as_ptr() as usize;
+        (self.on_progress)(Progress::Cut {
+            index,
+            reason,
+            source: (source_start, source_start + text.len()),
+            output: (start, self.emitted),
+        });
         Ok(StopReason::Finished)
     }
 }
@@ -903,7 +918,9 @@ mod tests {
         assert_eq!(backend.prompts.len(), 3);
         assert!(progress.contains(&Progress::Cut {
             index: 0,
-            reason: StopReason::Repetition { kept: 3 }
+            reason: StopReason::Repetition { kept: 3 },
+            source: (0, 5),
+            output: (0, 3),
         }));
     }
 

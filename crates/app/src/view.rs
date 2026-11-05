@@ -157,6 +157,14 @@ struct Cached {
     chunks: Vec<ChunkSpan>,
 }
 
+/// A passage whose translation kept looping and was cut: the source sentence and what was kept
+/// of its translation, as byte ranges.
+#[derive(Debug, Clone)]
+struct CutMark {
+    source: Range<usize>,
+    output: Range<usize>,
+}
+
 /// What synchronized scrolling last saw of each pane (indexed by `Side as usize`).
 #[derive(Default)]
 struct SyncState {
@@ -283,6 +291,10 @@ pub struct TranslatorView {
     cache: VecDeque<Cached>,
     /// Chunks of the shown translation, for synchronized scrolling.
     chunks: Vec<ChunkSpan>,
+    /// Passages of the shown translation that kept looping and were cut, and the one the status
+    /// bar shows next.
+    cuts: Vec<CutMark>,
+    next_cut: usize,
     /// The alignment of the shown translation, keyed by its length and chunk count.
     alignment: Option<((usize, usize), Alignment)>,
     /// Incremented when the source text changes; the alignment holds only while it matches
@@ -556,6 +568,8 @@ impl TranslatorView {
             source_info: None,
             cache: VecDeque::new(),
             chunks: Vec::new(),
+            cuts: Vec::new(),
+            next_cut: 0,
             alignment: None,
             source_version: 0,
             shown_version: 0,
@@ -1095,6 +1109,8 @@ impl TranslatorView {
     /// Replaces the output and scrolls it back to the top.
     fn set_translation(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.chunks.clear();
+        self.cuts.clear();
+        self.next_cut = 0;
         self.translation_utf16 = text.encode_utf16().count();
         self.translation = text;
         let text = SharedString::from(self.translation.clone());
@@ -1283,11 +1299,27 @@ impl TranslatorView {
                 );
                 return;
             }
-            Event::Cut { job, index, reason } if is_current(job) => {
+            Event::Cut {
+                job,
+                index,
+                reason,
+                source: (start, end),
+                output: (output_start, output_end),
+            } if is_current(job) => {
+                let char_position = self
+                    .shown
+                    .as_ref()
+                    .and_then(|r| r.text.get(..start))
+                    .map_or(0, |before| before.chars().count());
                 crate::app_log!(
-                    "chunk {}: output ran away again ({reason:?}) and was cut",
+                    "chunk {}: output ran away again ({reason:?}) and was cut; source characters \
+                     from {char_position}",
                     index + 1
                 );
+                self.cuts.push(CutMark {
+                    source: start..end,
+                    output: output_start..output_end,
+                });
                 return;
             }
             Event::Finished { job, stats } if is_current(job) => {
@@ -1453,6 +1485,28 @@ impl TranslatorView {
             }
             state.set_scroll_offset(scroll, cx);
         });
+    }
+
+    /// Selects the next passage that was cut in both panes and scrolls to it.
+    fn show_next_cut(&mut self, cx: &mut Context<Self>) {
+        let Some(cut) = self
+            .cuts
+            .get(self.next_cut % self.cuts.len().max(1))
+            .cloned()
+        else {
+            return;
+        };
+        self.next_cut += 1;
+        // A few lines below the top, so the text before it is in view too.
+        let y = px(48.);
+        self.scroll_pane(Side::Output, cut.output.start, y, cx);
+        self.output
+            .update(cx, |state, cx| state.set_selected_range(cut.output, cx));
+        if self.source_version == self.shown_version {
+            self.scroll_pane(Side::Source, cut.source.start, y, cx);
+            self.source
+                .update(cx, |state, cx| state.set_selected_range(cut.source, cx));
+        }
     }
 
     fn set_sync_scroll(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -1817,7 +1871,21 @@ impl Render for TranslatorView {
             .text_xs()
             .text_color(theme.muted_foreground)
             .gap_2()
-            .child(div().flex_1().min_w_0().child(self.status_text()))
+            .child(
+                div()
+                    .id("status")
+                    .flex_1()
+                    .min_w_0()
+                    .child(self.status_text())
+                    .when(
+                        matches!(self.status, Status::Done { cut, .. } if cut > 0)
+                            && !self.cuts.is_empty(),
+                        |this| {
+                            this.cursor_pointer()
+                                .on_click(cx.listener(|this, _, _, cx| this.show_next_cut(cx)))
+                        },
+                    ),
+            )
             .child(model_button)
             .child(settings_button)
             // Attribution required by the PLaMo Community License (Article 4).
