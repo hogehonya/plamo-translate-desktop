@@ -1,6 +1,6 @@
 # PLaMo Translate Desktop — Design
 
-Status: describes v0.1.0 (2026-11-05). Update it together with the code.
+Status: describes the code after v0.1.0 (released 2026-11-05), towards v0.2.0. Update it together with the code.
 
 ## 1. Goal
 
@@ -468,7 +468,8 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 ## 13. Status and later work
 
 Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2), device selection (M3),
-translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry), and the browser extension.
+translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
+Since then (v0.2.0): the browser extension (§12).
 
 Possible later work:
 
