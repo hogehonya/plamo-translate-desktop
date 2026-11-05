@@ -192,13 +192,22 @@ jobs:
           Copy-Item "$profile_dir\examples\translate.exe" $dist
           & "$dist\translate.exe" --list-devices
           if ($LASTEXITCODE -ne 0) { throw "translate.exe failed with exit code $LASTEXITCODE" }
-          Remove-Item "$dist\translate.exe"
+          New-Item -ItemType Directory -Force cli | Out-Null
+          Move-Item "$dist\translate.exe" cli
           Compress-Archive -Path $dist -DestinationPath "$env:PACKAGE.zip"
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.PACKAGE }}
           path: ${{ env.PACKAGE }}.zip
+
+      # For testing the engine on Windows GPUs: place translate.exe next to the package's DLLs.
+      - name: Upload the translate CLI (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PACKAGE }}-cli
+          path: cli/translate.exe
 
   publish:
     name: Publish release
