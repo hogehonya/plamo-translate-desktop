@@ -31,6 +31,7 @@ options:
   --chunk-tokens N    upper bound for a chunk of a long text (default: 1024)
   --history-tokens N  upper bound for the history sent with a chunk (default: 4096)
   --output PATH       write the final translation to PATH instead of streaming it
+  --chunks PATH       write each chunk's source and translation to PATH (JSON lines)
   --threads N         CPU threads
   --gpu INDEX         offload to the ggml device INDEX (see --list-devices)
   --gpu-layers N      number of layers to offload (default: all)
@@ -51,6 +52,7 @@ struct Args {
     chunk_tokens: Option<usize>,
     history_tokens: Option<usize>,
     output: Option<PathBuf>,
+    chunks: Option<PathBuf>,
     threads: Option<i32>,
     gpu: Option<usize>,
     gpu_layers: Option<u32>,
@@ -89,6 +91,7 @@ fn parse_args() -> anyhow::Result<Args> {
             "--chunk-tokens" => args.chunk_tokens = Some(value()?.parse()?),
             "--history-tokens" => args.history_tokens = Some(value()?.parse()?),
             "--output" => args.output = Some(value()?.into()),
+            "--chunks" => args.chunks = Some(value()?.into()),
             "--threads" => args.threads = Some(value()?.parse()?),
             "--gpu" => args.gpu = Some(value()?.parse()?),
             "--gpu-layers" => args.gpu_layers = Some(value()?.parse()?),
@@ -203,7 +206,10 @@ fn main() -> anyhow::Result<()> {
         max_history_tokens: args.history_tokens.unwrap_or(defaults.max_history_tokens),
     };
     let streaming = args.output.is_none();
-    let mut translation = String::new();
+    // Shared by the output and progress callbacks.
+    let translation = std::cell::RefCell::new(String::new());
+    // (source range, output offset) at the start of each chunk.
+    let mut chunk_starts: Vec<((usize, usize), usize)> = Vec::new();
     let mut stdout = std::io::stdout();
     let started = std::time::Instant::now();
     let stats = translate_document(
@@ -215,21 +221,26 @@ fn main() -> anyhow::Result<()> {
         &text,
         &mut |output| match output {
             Output::Text(piece) => {
-                translation.push_str(piece);
+                translation.borrow_mut().push_str(piece);
                 if streaming {
                     let _ = stdout.write_all(piece.as_bytes());
                     let _ = stdout.flush();
                 }
             }
             Output::Truncate(len) => {
-                translation.truncate(len);
+                translation.borrow_mut().truncate(len);
                 if streaming {
                     eprintln!("\n[output withdrawn back to byte {len}]");
                 }
             }
         },
         &mut |progress| match progress {
-            Progress::Chunk { index, count } => {
+            Progress::Chunk {
+                index,
+                count,
+                source,
+            } => {
+                chunk_starts.push((source, translation.borrow().len()));
                 if count > 1 {
                     eprintln!("[chunk {}/{count}, {:.0?}]", index + 1, started.elapsed());
                 }
@@ -248,9 +259,26 @@ fn main() -> anyhow::Result<()> {
         },
         &|| false,
     )?;
+    let translation = translation.into_inner();
     match &args.output {
         Some(path) => std::fs::write(path, &translation)?,
         None => println!(),
+    }
+    if let Some(path) = &args.chunks {
+        let mut lines = String::new();
+        for (i, &((start, end), from)) in chunk_starts.iter().enumerate() {
+            let to = chunk_starts
+                .get(i + 1)
+                .map_or(translation.len(), |&(_, offset)| offset);
+            let line = serde_json::json!({
+                "index": i,
+                "source": &text[start..end],
+                "translation": translation[from..to].trim(),
+            });
+            lines.push_str(&line.to_string());
+            lines.push('\n');
+        }
+        std::fs::write(path, lines)?;
     }
     eprintln!(
         "[{:?}: prompt {} tok in {:.2?}, generated {} tok in {:.2?} ({:.1} tok/s), \

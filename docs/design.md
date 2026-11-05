@@ -154,9 +154,11 @@ The first implementation is `LlamaCppBackend`:
 - Splitting:
   - The text is split into paragraphs at blank lines.
   - Neighbouring paragraphs are packed into one chunk while they fit.
-  - A paragraph larger than the chunk budget is split at sentence ends (`。！？．`, or `.!?` before whitespace), keeping closing quotes and brackets with their sentence.
-    Line breaks inside a paragraph are ordinary whitespace here, so hard-wrapped prose keeps its sentences whole.
-    Only a sentence that is still too long is split at its line breaks.
+  - A paragraph larger than the chunk budget is split at the most natural boundary that makes it fit, in this order:
+    1. Line breaks after the end of a sentence. Japanese prose usually separates paragraphs with a single newline (and indents with U+3000).
+    2. Sentence ends (`。！？．`, or `.!?` before whitespace), keeping closing quotes and brackets with their sentence.
+       Other line breaks are ordinary whitespace here, so hard-wrapped prose keeps its sentences whole.
+    3. Any line break, for a sentence that is still too long.
   - Leading whitespace and the separators between chunks are copied unchanged into the output.
 - Budget: a chunk gets at most 1,024 tokens and history at most 4,096 (`DocumentOptions`).
   Settings → Chunk size and History change these (256–4,096 and none–8,192 tokens; other values can be set in `settings.json`).

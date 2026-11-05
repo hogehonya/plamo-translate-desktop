@@ -269,7 +269,7 @@ fn serve(
                 Output::Truncate(len) => events(Event::Rewind { job, len }),
             },
             &mut |progress| match progress {
-                Progress::Chunk { index, count } => events(Event::Chunk { job, index, count }),
+                Progress::Chunk { index, count, .. } => events(Event::Chunk { job, index, count }),
                 Progress::Retry { index, reason, .. } => {
                     events(Event::Retry { job, index, reason })
                 }

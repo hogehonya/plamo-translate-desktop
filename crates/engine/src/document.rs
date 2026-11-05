@@ -53,8 +53,12 @@ pub enum Output<'a> {
 /// Progress reports of [`translate_document`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Progress {
-    /// Chunk `index` of `count` is starting.
-    Chunk { index: usize, count: usize },
+    /// Chunk `index` of `count` is starting. `source` is its byte range in the text.
+    Chunk {
+        index: usize,
+        count: usize,
+        source: (usize, usize),
+    },
     /// The output for chunk `index` ran away (`reason`) and is translated again in `pieces`
     /// sentences.
     Retry {
@@ -104,21 +108,17 @@ pub fn split<'a>(
     let body_start = text.len() - text.trim_start().len();
     let leading = &text[..body_start];
 
-    // Paragraphs as (start, end, separator_end) byte ranges.
+    // Paragraphs as (start, end, separator_end) byte ranges, split further where too large.
     let mut pieces = Vec::new();
-    for (start, end, sep_end) in paragraphs(text, body_start) {
-        let paragraph = &text[start..end];
-        if count_tokens(paragraph) <= max_tokens {
-            pieces.push((start, end, sep_end));
-            continue;
-        }
-        for (s, e, se) in sentences(text, start, end, sep_end, false) {
-            if count_tokens(&text[s..e]) <= max_tokens {
-                pieces.push((s, e, se));
-            } else {
-                pieces.extend(sentences(text, s, e, se, true));
-            }
-        }
+    for range in paragraphs(text, body_start) {
+        refine(
+            text,
+            range,
+            Boundary::LineAfterSentence,
+            max_tokens,
+            count_tokens,
+            &mut pieces,
+        );
     }
 
     // Pack neighbouring pieces while they fit.
@@ -143,6 +143,91 @@ pub fn split<'a>(
         i = j;
     }
     Split { leading, chunks }
+}
+
+/// Where a piece too large for a chunk is split, from the most to the least natural.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Boundary {
+    /// A line break after the end of a sentence: a paragraph break in text that separates
+    /// paragraphs with a single newline, as Japanese prose usually does.
+    LineAfterSentence,
+    /// The end of a sentence. Other line breaks are ordinary whitespace, as in hard-wrapped prose.
+    Sentence,
+    /// Any line break.
+    Line,
+}
+
+/// Appends `range` to `out` if it fits in `max_tokens`, or else its parts split at `boundary`,
+/// each refined further at the next boundary. A piece without any boundary is kept whole.
+fn refine(
+    text: &str,
+    range: (usize, usize, usize),
+    boundary: Boundary,
+    max_tokens: usize,
+    count_tokens: &dyn Fn(&str) -> usize,
+    out: &mut Vec<(usize, usize, usize)>,
+) {
+    let (start, end, sep_end) = range;
+    if count_tokens(&text[start..end]) <= max_tokens {
+        out.push(range);
+        return;
+    }
+    let (parts, next) = match boundary {
+        Boundary::LineAfterSentence => (
+            lines_after_sentences(text, start, end, sep_end),
+            Some(Boundary::Sentence),
+        ),
+        Boundary::Sentence => (
+            sentences(text, start, end, sep_end, false),
+            Some(Boundary::Line),
+        ),
+        Boundary::Line => (sentences(text, start, end, sep_end, true), None),
+    };
+    for part in parts {
+        match next {
+            Some(next) => refine(text, part, next, max_tokens, count_tokens, out),
+            None => out.push(part),
+        }
+    }
+}
+
+/// Whether a line ending with `line` (trailing whitespace removed) ends a sentence: terminal
+/// punctuation, possibly inside closing quotes or brackets, or a Japanese closing quote.
+fn ends_sentence(line: &str) -> bool {
+    let closing = |c: char| matches!(c, '」' | '』' | '）' | ')' | '"' | '\'' | '”' | '’');
+    let core = line.trim_end_matches(closing);
+    let japanese_quote = line[core.len()..].contains(['」', '』']);
+    japanese_quote
+        || core
+            .chars()
+            .last()
+            .is_some_and(|c| matches!(c, '。' | '！' | '？' | '．' | '.' | '!' | '?'))
+}
+
+/// Ranges within `text[start..end]` split at line breaks that follow the end of a sentence, the
+/// last one taking `sep_end`.
+fn lines_after_sentences(
+    text: &str,
+    start: usize,
+    end: usize,
+    sep_end: usize,
+) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    let mut piece_start = start;
+    let mut i = start;
+    while let Some(offset) = text[i..end].find('\n') {
+        let newline = i + offset;
+        let line = text[piece_start..newline].trim_end();
+        let rest = &text[newline..end];
+        let next_start = newline + (rest.len() - rest.trim_start().len());
+        if ends_sentence(line) && next_start < end && !line.is_empty() {
+            out.push((piece_start, piece_start + line.len(), next_start));
+            piece_start = next_start;
+        }
+        i = next_start.max(newline + 1);
+    }
+    out.push((piece_start, end, sep_end));
+    out
 }
 
 /// Paragraph ranges in `text[from..]`: (start, end of text, end of following whitespace).
@@ -321,7 +406,13 @@ pub fn translate_document(
 
     let count = split.chunks.len();
     for (index, chunk) in split.chunks.iter().enumerate() {
-        (translator.on_progress)(Progress::Chunk { index, count });
+        // Chunks are slices of `text`.
+        let start = chunk.text.as_ptr() as usize - text.as_ptr() as usize;
+        (translator.on_progress)(Progress::Chunk {
+            index,
+            count,
+            source: (start, start + chunk.text.len()),
+        });
         let reason = translator.chunk(index, chunk.text)?;
         translator.total.stop_reason = reason;
         if reason != StopReason::Finished {
@@ -668,8 +759,16 @@ mod tests {
         assert_eq!(
             progress,
             [
-                Progress::Chunk { index: 0, count: 2 },
-                Progress::Chunk { index: 1, count: 2 }
+                Progress::Chunk {
+                    index: 0,
+                    count: 2,
+                    source: (1, 18)
+                },
+                Progress::Chunk {
+                    index: 1,
+                    count: 2,
+                    source: (20, 39)
+                }
             ]
         );
         assert_eq!(stats.prompt_tokens, 2);
@@ -783,6 +882,28 @@ mod tests {
             ]
         );
         assert_eq!(rejoin(&s), text);
+    }
+
+    #[test]
+    fn single_newline_paragraphs_split_at_line_ends() {
+        // Japanese prose: one paragraph per line, no blank lines, indented with U+3000.
+        let text = "メロスは激怒した。王を除かねばならぬ。\n　メロスは村を出た。\n「待て」\n　そう言った。";
+        let s = split(text, 25, &chars);
+        let texts: Vec<_> = s.chunks.iter().map(|c| c.text).collect();
+        assert_eq!(
+            texts,
+            [
+                "メロスは激怒した。王を除かねばならぬ。",
+                "メロスは村を出た。\n「待て」\n　そう言った。"
+            ]
+        );
+        assert_eq!(s.chunks[0].separator, "\n　");
+        assert_eq!(rejoin(&s), text);
+        // A line break inside a sentence is not a paragraph break.
+        assert!(!ends_sentence("This is a long"));
+        assert!(ends_sentence("He said \"no.\""));
+        assert!(ends_sentence("「待て」"));
+        assert!(!ends_sentence("(see above)"));
     }
 
     #[test]
