@@ -8,6 +8,7 @@ pub mod document;
 pub mod download;
 pub mod llama;
 pub mod models;
+pub mod repetition;
 mod utf8;
 pub mod worker;
 
@@ -50,6 +51,18 @@ pub enum StopReason {
     Cancelled,
     /// The context window filled up before the translation finished.
     ContextFull,
+    /// The output fell into a loop (see [`repetition`]). `kept` is the length in bytes of the
+    /// output up to the end of the cycle's first occurrence.
+    Repetition { kept: usize },
+    /// The output reached [`Generation::max_tokens`].
+    LengthLimit,
+}
+
+impl StopReason {
+    /// Whether generation ran away: the output looped or grew far longer than the input.
+    pub fn is_runaway(self) -> bool {
+        matches!(self, Self::Repetition { .. } | Self::LengthLimit)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +72,10 @@ pub struct TranslateStats {
     pub prompt_duration: Duration,
     pub generation_duration: Duration,
     pub stop_reason: StopReason,
+    /// Document translation: pieces translated again because the first output ran away.
+    pub retries: usize,
+    /// Document translation: pieces whose output still ran away after retrying and was cut.
+    pub cut: usize,
 }
 
 impl TranslateStats {
@@ -72,14 +89,36 @@ impl TranslateStats {
     }
 }
 
+/// Settings for generating one translation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Generation {
+    /// Stop with [`StopReason::LengthLimit`] after this many tokens.
+    pub max_tokens: usize,
+    /// Penalize repeating earlier output (llama.cpp's DRY sampler) instead of decoding purely
+    /// greedily. This also discourages legitimate repetition, so it is only used to retry output
+    /// that looped.
+    pub penalize_repetition: bool,
+}
+
+impl Generation {
+    pub fn greedy(max_tokens: usize) -> Self {
+        Self {
+            max_tokens,
+            penalize_repetition: false,
+        }
+    }
+}
+
 /// Something that can translate a single PFML prompt, streaming the output.
 pub trait TranslationBackend {
     /// Translates `prompt`, passing decoded text to `sink` as it is generated.
     ///
+    /// Generation stops early with [`StopReason::Repetition`] when the output loops.
     /// `is_cancelled` is polled before every generated token.
     fn translate(
         &mut self,
         prompt: &pfml::Prompt<'_>,
+        generation: &Generation,
         sink: &mut dyn FnMut(&str),
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<TranslateStats>;

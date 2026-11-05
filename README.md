@@ -13,6 +13,7 @@ locally on your computer. It works offline once a model is downloaded. Written i
 - Paste to translate; text you type is translated after a short pause. The translation streams in as it is generated, with the live speed in the status bar, and can be stopped at any time.
 - Japanese output style (polite or plain), a reference context, and a glossary (`source = target`, one term per line).
 - Long texts are split into paragraphs and translated in order, with earlier pairs passed as history to keep wording consistent.
+  Output that falls into a repetition loop is detected, withdrawn, and translated again sentence by sentence.
 - Built-in model manager: choose a model size and quantization (0.8B, 2B, 8B or 31B GGUF).
   - Each file shows the translation quality PFN publishes, with the difference from the unquantized model.
   - Downloads resume after an interruption and are verified with SHA-256.

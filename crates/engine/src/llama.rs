@@ -20,8 +20,9 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::{LlamaBackendDeviceType, LogOptions};
 use pfml::{Prompt, Segment, SpecialToken};
 
+use crate::repetition::LoopDetector;
 use crate::utf8::Utf8Stream;
-use crate::{EngineError, Result, StopReason, TranslateStats, TranslationBackend};
+use crate::{EngineError, Generation, Result, StopReason, TranslateStats, TranslationBackend};
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeOptions {
@@ -333,6 +334,7 @@ impl TranslationBackend for Session<'_> {
     fn translate(
         &mut self,
         prompt: &Prompt<'_>,
+        generation: &Generation,
         sink: &mut dyn FnMut(&str),
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<TranslateStats> {
@@ -352,11 +354,25 @@ impl TranslationBackend for Session<'_> {
 
         let vocab = self.model.model.vocab();
         let tag = self.model.specials.get(SpecialToken::Tag);
-        let mut sampler = LlamaSampler::greedy();
+        let mut sampler = if generation.penalize_repetition {
+            // llama.cpp's recommended DRY settings. The sampler only sees generated tokens, so
+            // it penalizes the output repeating itself, not copying names from the source.
+            LlamaSampler::chain_simple([
+                LlamaSampler::dry(&self.model.model, 0.8, 1.75, 2, -1, ["\n", ":", "\"", "*"]),
+                LlamaSampler::greedy(),
+            ])
+        } else {
+            LlamaSampler::greedy()
+        };
+        let input: Vec<i32> = tokens.iter().map(|t| t.0).collect();
+        let mut loops = LoopDetector::for_input(&input);
         let mut utf8 = Utf8Stream::default();
         let mut piece = Vec::new();
         let mut pos = tokens.len();
         let mut generated = 0;
+        // Bytes of output passed to `sink` after each generated token.
+        let mut emitted = 0;
+        let mut ends = Vec::new();
         let generation_start = Instant::now();
 
         let stop_reason = loop {
@@ -376,7 +392,17 @@ impl TranslationBackend for Session<'_> {
             if !text.is_empty() {
                 sink(&text);
             }
+            emitted += text.len();
+            ends.push(emitted);
 
+            if let Some(found) = loops.push(token.0) {
+                break StopReason::Repetition {
+                    kept: ends[found.first_end() - 1],
+                };
+            }
+            if generated >= generation.max_tokens {
+                break StopReason::LengthLimit;
+            }
             if pos >= n_ctx {
                 break StopReason::ContextFull;
             }
@@ -397,6 +423,8 @@ impl TranslationBackend for Session<'_> {
             prompt_duration,
             generation_duration: generation_start.elapsed(),
             stop_reason,
+            retries: 0,
+            cut: 0,
         })
     }
 }

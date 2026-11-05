@@ -96,6 +96,8 @@ enum Status {
     },
     Done {
         tokens_per_second: f64,
+        /// Passages whose output kept looping and was cut.
+        cut: usize,
     },
     Cached,
     Stopped,
@@ -782,6 +784,18 @@ impl TranslatorView {
     /// Shows newly streamed text, keeping the reader's scroll position.
     fn append_translation(&mut self, piece: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.translation.push_str(piece);
+        self.show_streamed(window, cx);
+    }
+
+    /// Withdraws streamed text after `len` bytes: output that ran away is being retried.
+    fn rewind_translation(&mut self, len: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if len < self.translation.len() && self.translation.is_char_boundary(len) {
+            self.translation.truncate(len);
+            self.show_streamed(window, cx);
+        }
+    }
+
+    fn show_streamed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = SharedString::from(self.translation.clone());
         self.output.update(cx, |state, cx| {
             // `set_value` scrolls to the start; restore where the reader was.
@@ -887,6 +901,24 @@ impl TranslatorView {
             Event::Token { job, text } if is_current(job) => {
                 self.append_translation(&text, window, cx);
             }
+            Event::Rewind { job, len } if is_current(job) => {
+                self.rewind_translation(len, window, cx);
+            }
+            // Logged without any text, so reports of odd output show whether loops occurred.
+            Event::Retry { job, index, reason } if is_current(job) => {
+                crate::app_log!(
+                    "chunk {}: output ran away ({reason:?}); retrying sentence by sentence",
+                    index + 1
+                );
+                return;
+            }
+            Event::Cut { job, index, reason } if is_current(job) => {
+                crate::app_log!(
+                    "chunk {}: output ran away again ({reason:?}) and was cut",
+                    index + 1
+                );
+                return;
+            }
             Event::Finished { job, stats } if is_current(job) => {
                 self.current_job = None;
                 self.status = match stats.stop_reason {
@@ -896,11 +928,14 @@ impl TranslatorView {
                         }
                         Status::Done {
                             tokens_per_second: stats.generation_tokens_per_second(),
+                            cut: stats.cut,
                         }
                     }
                     StopReason::ContextFull => Status::Truncated,
                     // Only superseded jobs are cancelled, and those are no longer current.
                     StopReason::Cancelled => Status::Ready,
+                    // Documents resolve runaway output themselves; these end single requests only.
+                    StopReason::Repetition { .. } | StopReason::LengthLimit => Status::Ready,
                 };
             }
             Event::Failed { job, error } if is_current(job) => {
@@ -911,6 +946,9 @@ impl TranslatorView {
             // Output of superseded jobs.
             Event::Chunk { .. }
             | Event::Token { .. }
+            | Event::Rewind { .. }
+            | Event::Retry { .. }
+            | Event::Cut { .. }
             | Event::Finished { .. }
             | Event::Failed { .. } => return,
         }
@@ -1011,8 +1049,16 @@ impl TranslatorView {
                 }
                 text
             }
-            Status::Done { tokens_per_second } => {
-                t!("status.done", speed = format!("{tokens_per_second:.1}")).into_owned()
+            Status::Done {
+                tokens_per_second,
+                cut,
+            } => {
+                let speed = format!("{tokens_per_second:.1}");
+                if *cut > 0 {
+                    t!("status.done_cut", speed = speed, count = cut).into_owned()
+                } else {
+                    t!("status.done", speed = speed).into_owned()
+                }
             }
             Status::Cached => t!("status.cached").into_owned(),
             Status::Stopped => t!("status.stopped").into_owned(),

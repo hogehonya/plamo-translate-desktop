@@ -15,9 +15,9 @@ use std::thread;
 
 use pfml::TranslationOptions;
 
-use crate::TranslateStats;
-use crate::document::translate_document;
+use crate::document::{DocumentOptions, Output, Progress, translate_document};
 use crate::llama::{Device, Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
+use crate::{StopReason, TranslateStats};
 
 /// Identifies a translation job. Ids increase monotonically per worker.
 pub type JobId = u64;
@@ -58,6 +58,24 @@ pub enum Event {
     Token {
         job: JobId,
         text: String,
+    },
+    /// Keep only the first `len` bytes of the job's output: output that ran away is being
+    /// translated again.
+    Rewind {
+        job: JobId,
+        len: usize,
+    },
+    /// The output for chunk `index` ran away and is translated again sentence by sentence.
+    Retry {
+        job: JobId,
+        index: usize,
+        reason: StopReason,
+    },
+    /// Output for a sentence of chunk `index` kept running away and was cut.
+    Cut {
+        job: JobId,
+        index: usize,
+        reason: StopReason,
     },
     Finished {
         job: JobId,
@@ -224,17 +242,23 @@ fn serve(
             &mut session,
             &|s| model.count_tokens(s),
             n_ctx,
+            &DocumentOptions::default(),
             &options,
             &text,
-            &mut |piece| {
-                if !piece.is_empty() {
-                    events(Event::Token {
-                        job,
-                        text: piece.to_owned(),
-                    })
-                }
+            &mut |output| match output {
+                Output::Text(text) => events(Event::Token {
+                    job,
+                    text: text.to_owned(),
+                }),
+                Output::Truncate(len) => events(Event::Rewind { job, len }),
             },
-            &mut |index, count| events(Event::Chunk { job, index, count }),
+            &mut |progress| match progress {
+                Progress::Chunk { index, count } => events(Event::Chunk { job, index, count }),
+                Progress::Retry { index, reason, .. } => {
+                    events(Event::Retry { job, index, reason })
+                }
+                Progress::Cut { index, reason } => events(Event::Cut { job, index, reason }),
+            },
             &|| latest.load(Ordering::Relaxed) != job,
         );
         events(match result {

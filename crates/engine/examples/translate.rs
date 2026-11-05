@@ -5,13 +5,15 @@
 //!     --model path/to/plamo-3-translate-2b-Q4_K_M.gguf --to en "会議は来週の月曜日に変更されました。"
 //! ```
 //!
-//! Reads the text from stdin when no positional argument is given.
+//! Reads the text from stdin when no positional argument is given. The translation streams to
+//! stdout; output that runs away and is retried cannot be taken back there, so use `--output` to
+//! get the final text.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
-use engine::document::translate_document;
+use engine::document::{DocumentOptions, Output, Progress, translate_document};
 use engine::llama::{GpuOffload, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
 use engine::pfml::{Form, GlossaryEntry, LangCode, Prompt, TranslationOptions};
 
@@ -26,6 +28,9 @@ options:
   --context TEXT      reference context
   --glossary SRC=TGT  glossary entry (repeatable)
   --ctx N             context size in tokens (default: 32768)
+  --chunk-tokens N    upper bound for a chunk of a long text (default: 1024)
+  --history-tokens N  upper bound for the history sent with a chunk (default: 4096)
+  --output PATH       write the final translation to PATH instead of streaming it
   --threads N         CPU threads
   --gpu INDEX         offload to the ggml device INDEX (see --list-devices)
   --gpu-layers N      number of layers to offload (default: all)
@@ -43,6 +48,9 @@ struct Args {
     context: String,
     glossary: Vec<GlossaryEntry>,
     n_ctx: Option<u32>,
+    chunk_tokens: Option<usize>,
+    history_tokens: Option<usize>,
+    output: Option<PathBuf>,
     threads: Option<i32>,
     gpu: Option<usize>,
     gpu_layers: Option<u32>,
@@ -78,6 +86,9 @@ fn parse_args() -> anyhow::Result<Args> {
                 });
             }
             "--ctx" => args.n_ctx = Some(value()?.parse()?),
+            "--chunk-tokens" => args.chunk_tokens = Some(value()?.parse()?),
+            "--history-tokens" => args.history_tokens = Some(value()?.parse()?),
+            "--output" => args.output = Some(value()?.into()),
             "--threads" => args.threads = Some(value()?.parse()?),
             "--gpu" => args.gpu = Some(value()?.parse()?),
             "--gpu-layers" => args.gpu_layers = Some(value()?.parse()?),
@@ -186,33 +197,72 @@ fn main() -> anyhow::Result<()> {
 
     // Same path as the app: long texts are split and translated with history.
     let n_ctx = session.n_ctx();
+    let defaults = DocumentOptions::default();
+    let document = DocumentOptions {
+        max_chunk_tokens: args.chunk_tokens.unwrap_or(defaults.max_chunk_tokens),
+        max_history_tokens: args.history_tokens.unwrap_or(defaults.max_history_tokens),
+    };
+    let streaming = args.output.is_none();
+    let mut translation = String::new();
     let mut stdout = std::io::stdout();
+    let started = std::time::Instant::now();
     let stats = translate_document(
         &mut session,
         &|s| model.count_tokens(s),
         n_ctx,
+        &document,
         &options,
         &text,
-        &mut |piece| {
-            let _ = stdout.write_all(piece.as_bytes());
-            let _ = stdout.flush();
+        &mut |output| match output {
+            Output::Text(piece) => {
+                translation.push_str(piece);
+                if streaming {
+                    let _ = stdout.write_all(piece.as_bytes());
+                    let _ = stdout.flush();
+                }
+            }
+            Output::Truncate(len) => {
+                translation.truncate(len);
+                if streaming {
+                    eprintln!("\n[output withdrawn back to byte {len}]");
+                }
+            }
         },
-        &mut |index, count| {
-            if count > 1 {
-                eprintln!("\n[chunk {}/{count}]", index + 1);
+        &mut |progress| match progress {
+            Progress::Chunk { index, count } => {
+                if count > 1 {
+                    eprintln!("[chunk {}/{count}, {:.0?}]", index + 1, started.elapsed());
+                }
+            }
+            Progress::Retry {
+                index,
+                reason,
+                pieces,
+            } => eprintln!(
+                "[chunk {}: {reason:?}, retrying in {pieces} sentences]",
+                index + 1
+            ),
+            Progress::Cut { index, reason } => {
+                eprintln!("[chunk {}: {reason:?} again, output cut]", index + 1)
             }
         },
         &|| false,
     )?;
-    println!();
+    match &args.output {
+        Some(path) => std::fs::write(path, &translation)?,
+        None => println!(),
+    }
     eprintln!(
-        "[{:?}: prompt {} tok in {:.2?}, generated {} tok in {:.2?} ({:.1} tok/s)]",
+        "[{:?}: prompt {} tok in {:.2?}, generated {} tok in {:.2?} ({:.1} tok/s), \
+         {} retried, {} cut]",
         stats.stop_reason,
         stats.prompt_tokens,
         stats.prompt_duration,
         stats.generated_tokens,
         stats.generation_duration,
         stats.generation_tokens_per_second(),
+        stats.retries,
+        stats.cut,
     );
     Ok(())
 }

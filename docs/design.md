@@ -138,7 +138,7 @@ The first implementation is `LlamaCppBackend`:
 - Model parameters: the selected device(s) (`with_devices`) and the number of GPU layers (all by default).
 - Context: `n_ctx` defaults to 16384 and can be configured up to 32768.
 - Decoding is greedy. It stops on the `<|plamo:tag|>` token, on any end-of-generation token (`<|plamo:bos|>` is the EOS),
-  on cancellation, or when the context is full.
+  on cancellation, when the context is full, or when the output runs away (6.1).
 - Output is decoded incrementally, so a UTF-8 sequence split across tokens is never shown half-finished.
 - Each request starts with a fresh KV cache. Reusing the KV prefix across chunks is a later optimization.
 
@@ -150,12 +150,40 @@ The first implementation is `LlamaCppBackend`:
   - The text is split into paragraphs at blank lines.
   - Neighbouring paragraphs are packed into one chunk while they fit.
   - A paragraph larger than the chunk budget is split at sentence ends (`。！？．`, or `.!?` before whitespace), keeping closing quotes and brackets with their sentence.
+    Line breaks inside a paragraph are ordinary whitespace here, so hard-wrapped prose keeps its sentences whole.
+    Only a sentence that is still too long is split at its line breaks.
   - Leading whitespace and the separators between chunks are copied unchanged into the output.
-- Budget: the fixed parts (context and glossary, plus a margin of 64 tokens) come off `n_ctx`.
-  Of what remains, a chunk gets 1/5 and history 1/2, and the output gets the rest.
-  A history pair is roughly twice a chunk.
+- Budget: a chunk gets at most 1,024 tokens and history at most 4,096 (`DocumentOptions`).
+  They are further limited to 1/6 and 1/3 of `n_ctx` minus the fixed parts (context and glossary, plus a margin of 64 tokens),
+  so the output always has room for three times the chunk.
+- Why chunks are small, although the model was trained on 32k tokens:
+  - PLaMo 3 attends to only the last 2,048 tokens in 7 of every 8 layers. Small models decoding greedily lose their place in long outputs.
+  - Measured with 0.8B Q4_K_M on the first 250 KB of an English book (Project Gutenberg #5000, into Japanese, ROCm):
+
+    | Chunk / history (tokens) | Chunks | Looped | Output paragraphs (source: 1,158) | Time |
+    |---|---|---|---|---|
+    | about 5,400 / 10,900 (the earlier 1/5 and 1/2 of 32k) | 11 | 5 | 607 | 533 s |
+    | 1,024 / 4,096 | 57 | 0 | 1,159 | 202 s |
+
+    Large chunks also dropped about half of the paragraphs silently.
+  - PFN's published scores are for sentence- and paragraph-level inputs, and the model card's examples cap the output at 512 tokens.
+  - A typical paragraph still fits in one chunk: in that book, 4 of 6,942 paragraphs exceed about 700 words.
 - History: chunks are translated in order. The most recent source/translation pairs that fit the history budget go into each prompt,
   and the oldest drop first, as the model card recommends.
+- Runaway output (`engine::repetition`):
+  - Greedy decoding can fall into a cycle and repeat a few tokens until the context is full.
+    Whether it does depends on near-ties between tokens, so it differs between backends, GPUs, and thread counts.
+  - The detector tracks, for each period up to 128 tokens, how long the output has repeated with that period (constant time per token and period).
+    A loop is a span of at least 64 tokens that repeats its cycle at least three times.
+    The threshold rises to twice the longest such span in the prompt, so input that repeats legitimately (rulers, refrains) can be translated.
+  - The output of a chunk is also limited to 3 × its tokens + 128.
+  - Recovery:
+    1. A chunk whose output runs away is withdrawn (`Output::Truncate`, `Event::Rewind`) and translated again sentence by sentence.
+    2. A sentence that runs away again is retried with llama.cpp's DRY sampler (multiplier 0.8, base 1.75, allowed length 2), which penalizes the output repeating itself.
+       DRY is not used otherwise, because it also discourages legitimate repetition.
+    3. If even that loops, the output is cut after the cycle's first occurrence.
+  - Output that ran away never enters the history, so one loop cannot seed the next.
+  - The app logs retries and cuts to `app.log` (without text). The status bar reports cuts.
 - The worker reports `Chunk { index, count }`, and the status bar shows progress such as `(2/5)`.
 
 ### 6.2 Context and glossary
