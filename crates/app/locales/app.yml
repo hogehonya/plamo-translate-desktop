@@ -44,6 +44,25 @@ action.copied:
 action.clear:
   en: Clear
   ja: クリア
+options.toggle:
+  en: Context & glossary
+  ja: 文脈・用語集
+options.toggle_with_terms:
+  en: "Context & glossary (%{count})"
+  ja: "文脈・用語集（%{count}）"
+options.context:
+  en: Context (background for the translation, not translated)
+  ja: 文脈（翻訳の参考情報。これ自体は翻訳されません）
+options.context_placeholder:
+  en: "e.g. This is the help page of a project management tool."
+  ja: "例: プロジェクト管理ツールのヘルプページです。"
+options.glossary:
+  en: "Glossary (one term per line: source = target)"
+  ja: "用語集（1 行に 1 語：原語 = 訳語）"
+options.glossary_placeholder:
+  en: "オーナー = assignee"
+  ja: "オーナー = assignee"
+
 action.auto_translate:
   en: Auto
   ja: 自動翻訳

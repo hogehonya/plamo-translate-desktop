@@ -28,6 +28,8 @@ pub struct Settings {
     /// Whether the user accepted the PLaMo Community License before downloading.
     pub license_accepted: bool,
     pub backend: BackendSettings,
+    /// Glossary text, one `source = target` per line.
+    pub glossary: String,
 }
 
 /// Where and how the model runs.

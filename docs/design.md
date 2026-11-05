@@ -144,12 +144,27 @@ The first implementation is `LlamaCppBackend`:
 
 ### 6.1 Long text
 
-- The input is split into paragraphs on blank lines. Any paragraph larger than the input budget is split again
-  at sentence boundaries (`。．！？.!?` followed by whitespace or end of text).
-- Chunks are translated in order. The most recent source/translation pairs are passed as history, and the oldest
-  pairs are dropped first when the token budget runs out, as the model card recommends.
-- The separators between chunks (line breaks, blank lines) are copied unchanged into the output.
-- Budget: the input chunk is at most about a third of `n_ctx`. The generation limit is whatever context remains.
+`engine::document` handles long texts. The worker runs every request through it, and a short text is a single chunk.
+
+- Splitting:
+  - The text is split into paragraphs at blank lines.
+  - Neighbouring paragraphs are packed into one chunk while they fit.
+  - A paragraph larger than the chunk budget is split at sentence ends (`。！？．`, or `.!?` before whitespace), keeping closing quotes and brackets with their sentence.
+  - Leading whitespace and the separators between chunks are copied unchanged into the output.
+- Budget: the fixed parts (context and glossary, plus a margin of 64 tokens) come off `n_ctx`.
+  Of what remains, a chunk gets 1/5 and history 1/2, and the output gets the rest.
+  A history pair is roughly twice a chunk.
+- History: chunks are translated in order. The most recent source/translation pairs that fit the history budget go into each prompt,
+  and the oldest drop first, as the model card recommends.
+- The worker reports `Chunk { index, count }`, and the status bar shows progress such as `(2/5)`.
+
+### 6.2 Context and glossary
+
+- The toolbar button "Context & glossary" opens two text areas below the panes.
+- Context is free text for the whole request. It is not persisted, because it is usually per document.
+- The glossary is written one term per line as `source = target`. A tab, `=>`, or `→` also works, and `#` starts a comment.
+  It is saved in settings, and the button shows the number of terms.
+- Editing either text area re-translates after the usual debounce.
 
 ## 7. Model management
 

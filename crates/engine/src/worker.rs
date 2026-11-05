@@ -13,10 +13,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 
-use pfml::{Prompt, TranslationOptions};
+use pfml::TranslationOptions;
 
 use crate::TranslateStats;
-use crate::TranslationBackend as _;
+use crate::document::translate_document;
 use crate::llama::{Device, Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
 
 /// Identifies a translation job. Ids increase monotonically per worker.
@@ -46,6 +46,12 @@ pub enum Event {
     LoadProgress(f32),
     Loaded(ModelInfo),
     LoadFailed(String),
+    /// A long text was split; chunk `index` of `count` is starting.
+    Chunk {
+        job: JobId,
+        index: usize,
+        count: usize,
+    },
     /// Generated text for a job, in order.
     Token {
         job: JobId,
@@ -207,15 +213,22 @@ fn serve(
         if latest.load(Ordering::SeqCst) != job {
             continue;
         }
-        let prompt = Prompt::new(&options, &text);
-        let result = session.translate(
-            &prompt,
+        let n_ctx = session.n_ctx();
+        let result = translate_document(
+            &mut session,
+            &|s| model.count_tokens(s),
+            n_ctx,
+            &options,
+            &text,
             &mut |piece| {
-                events(Event::Token {
-                    job,
-                    text: piece.to_owned(),
-                })
+                if !piece.is_empty() {
+                    events(Event::Token {
+                        job,
+                        text: piece.to_owned(),
+                    })
+                }
             },
+            &mut |index, count| events(Event::Chunk { job, index, count }),
             &|| latest.load(Ordering::Relaxed) != job,
         );
         events(match result {

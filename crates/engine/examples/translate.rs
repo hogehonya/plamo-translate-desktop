@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
-use engine::TranslationBackend;
+use engine::document::translate_document;
 use engine::llama::{GpuOffload, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
 use engine::pfml::{Form, GlossaryEntry, LangCode, Prompt, TranslationOptions};
 
@@ -184,12 +184,23 @@ fn main() -> anyhow::Result<()> {
     }
     let mut session = model.session(&runtime, &session_options)?;
 
+    // Same path as the app: long texts are split and translated with history.
+    let n_ctx = session.n_ctx();
     let mut stdout = std::io::stdout();
-    let stats = session.translate(
-        &prompt,
+    let stats = translate_document(
+        &mut session,
+        &|s| model.count_tokens(s),
+        n_ctx,
+        &options,
+        &text,
         &mut |piece| {
             let _ = stdout.write_all(piece.as_bytes());
             let _ = stdout.flush();
+        },
+        &mut |index, count| {
+            if count > 1 {
+                eprintln!("\n[chunk {}/{count}]", index + 1);
+            }
         },
         &|| false,
     )?;

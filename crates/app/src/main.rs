@@ -6,6 +6,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod backend;
+mod glossary;
 mod lang;
 mod models;
 mod settings;

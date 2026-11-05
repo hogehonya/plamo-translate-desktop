@@ -7,7 +7,7 @@ use std::time::Duration;
 use engine::StopReason;
 use engine::llama::{Device, RuntimeOptions, SessionOptions};
 use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
-use engine::pfml::{LangCode, TranslationOptions};
+use engine::pfml::{GlossaryEntry, LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -16,14 +16,15 @@ use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, IndexPath, Sizable as _, StyledExt as _,
-    TitleBar, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, IndexPath, Selectable as _, Sizable as _,
+    StyledExt as _, TitleBar, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::backend::{self, BackendEvent, BackendPanel};
+use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
 use crate::settings::{self, Settings};
@@ -83,8 +84,14 @@ enum Status {
     NoModel,
     Loading(f32),
     Ready,
-    Translating { target: &'static str },
-    Done { tokens_per_second: f64 },
+    Translating {
+        target: &'static str,
+        /// (current, total) when a long text was split.
+        chunk: Option<(usize, usize)>,
+    },
+    Done {
+        tokens_per_second: f64,
+    },
     Cached,
     Truncated,
     Error(String),
@@ -100,6 +107,11 @@ pub struct TranslatorView {
     target_choice: TargetChoice,
     style_choice: StyleChoice,
     auto_translate: bool,
+    context_input: Entity<TextareaState>,
+    glossary_input: Entity<TextareaState>,
+    show_options: bool,
+    context: String,
+    glossary: Vec<GlossaryEntry>,
 
     worker: Worker,
     models: Entity<ModelsPanel>,
@@ -140,6 +152,17 @@ impl TranslatorView {
             TextareaState::new(window, cx).placeholder(t!("source.placeholder").into_owned())
         });
         let output = cx.new(|cx| TextareaState::new(window, cx));
+        let context_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(t!("options.context_placeholder").into_owned())
+        });
+        let glossary_text = settings.glossary.clone();
+        let glossary_text_for_parse = glossary_text.clone();
+        let glossary_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(t!("options.glossary_placeholder").into_owned())
+                .default_value(glossary_text)
+        });
 
         let source_choice = SourceChoice::Detect;
         let target_choice = TargetChoice::JapaneseEnglish;
@@ -177,6 +200,21 @@ impl TranslatorView {
 
         let subscriptions = vec![
             cx.subscribe_in(&source, window, Self::on_source_event),
+            cx.subscribe_in(&context_input, window, |this, input, event, window, cx| {
+                if let InputEvent::Change = event {
+                    this.context = input.read(cx).value().to_string();
+                    this.options_edited(window, cx);
+                }
+            }),
+            cx.subscribe_in(&glossary_input, window, |this, input, event, window, cx| {
+                if let InputEvent::Change = event {
+                    let text = input.read(cx).value().to_string();
+                    this.glossary = glossary::parse(&text);
+                    this.settings.glossary = text;
+                    this.settings.save();
+                    this.options_edited(window, cx);
+                }
+            }),
             cx.subscribe_in(&models, window, Self::on_models_event),
             cx.subscribe_in(&backend, window, Self::on_backend_event),
             cx.subscribe_in(&source_select, window, |this, _, event, window, cx| {
@@ -243,6 +281,11 @@ impl TranslatorView {
             target_choice,
             style_choice,
             auto_translate: true,
+            context_input,
+            glossary_input,
+            show_options: false,
+            context: String::new(),
+            glossary: glossary::parse(&glossary_text_for_parse),
             worker,
             models,
             backend,
@@ -423,6 +466,14 @@ impl TranslatorView {
         cx.notify();
     }
 
+    /// Context or glossary text changed: re-translate after a pause, like typing in the source.
+    fn options_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.auto_translate {
+            self.schedule_translation(window, cx);
+        }
+        cx.notify();
+    }
+
     fn schedule_translation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.debounce = cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(DEBOUNCE).await;
@@ -440,6 +491,8 @@ impl TranslatorView {
         if options.target.is_japanese() {
             options.form = self.style_choice.form();
         }
+        options.context = self.context.clone();
+        options.glossary = self.glossary.clone();
         Request { options, text }
     }
 
@@ -481,7 +534,10 @@ impl TranslatorView {
                 .translate(request.options.clone(), request.text.clone()),
         );
         self.shown = Some(request);
-        self.status = Status::Translating { target };
+        self.status = Status::Translating {
+            target,
+            chunk: None,
+        };
         cx.notify();
     }
 
@@ -516,6 +572,11 @@ impl TranslatorView {
                 self.translate_now(window, cx);
             }
             Event::LoadFailed(e) | Event::RuntimeFailed(e) => self.status = Status::Error(e),
+            Event::Chunk { job, index, count } if is_current(job) => {
+                if let Status::Translating { chunk, .. } = &mut self.status {
+                    *chunk = (count > 1).then_some((index + 1, count));
+                }
+            }
             Event::Token { job, text } if is_current(job) => {
                 self.translation.push_str(&text);
                 self.refresh_output(window, cx);
@@ -542,7 +603,10 @@ impl TranslatorView {
                 self.status = Status::Error(error);
             }
             // Output of superseded jobs.
-            Event::Token { .. } | Event::Finished { .. } | Event::Failed { .. } => return,
+            Event::Chunk { .. }
+            | Event::Token { .. }
+            | Event::Finished { .. }
+            | Event::Failed { .. } => return,
         }
         cx.notify();
     }
@@ -621,8 +685,12 @@ impl TranslatorView {
                 t!("status.loading", percent = format!("{:.0}", p * 100.0)).into_owned()
             }
             Status::Ready => t!("status.ready").into_owned(),
-            Status::Translating { target } => {
-                t!("status.translating", lang = lang::language_name(target)).into_owned()
+            Status::Translating { target, chunk } => {
+                let text = t!("status.translating", lang = lang::language_name(target));
+                match chunk {
+                    Some((current, total)) => format!("{text} ({current}/{total})"),
+                    None => text.into_owned(),
+                }
             }
             Status::Done { tokens_per_second } => {
                 t!("status.done", speed = format!("{tokens_per_second:.1}")).into_owned()
@@ -641,6 +709,7 @@ impl Render for TranslatorView {
         let shows_style = self.target_choice.resolve(&source_text) == "ja";
         let view = cx.entity().downgrade();
         let theme = cx.theme();
+        let muted = theme.muted_foreground;
 
         let model_button_label = self.active_model.as_ref().map_or_else(
             || t!("models.none").into_owned(),
@@ -697,6 +766,21 @@ impl Render for TranslatorView {
                 this.child(Select::new(&self.style_select).w(px(190.)))
             })
             .child(div().flex_1())
+            .child(
+                Button::new("options")
+                    .ghost()
+                    .icon(IconName::Settings2)
+                    .label(if self.glossary.is_empty() {
+                        t!("options.toggle").into_owned()
+                    } else {
+                        t!("options.toggle_with_terms", count = self.glossary.len()).into_owned()
+                    })
+                    .selected(self.show_options)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_options = !this.show_options;
+                        cx.notify();
+                    })),
+            )
             .child(
                 Switch::new("auto-translate")
                     .checked(self.auto_translate)
@@ -804,6 +888,40 @@ impl Render for TranslatorView {
                     .child(source_pane)
                     .child(output_pane),
             )
+            .when(self.show_options, |this| {
+                this.child(
+                    h_flex()
+                        .px_3()
+                        .pb_2()
+                        .gap_3()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(t!("options.context").into_owned()),
+                                )
+                                .child(Textarea::new(&self.context_input).h(px(96.))),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(t!("options.glossary").into_owned()),
+                                )
+                                .child(Textarea::new(&self.glossary_input).h(px(96.))),
+                        ),
+                )
+            })
             .child(status_bar)
     }
 }
