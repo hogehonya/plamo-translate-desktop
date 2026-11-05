@@ -136,6 +136,11 @@ The first implementation is `LlamaCppBackend`:
 - At startup it loads the ggml backend modules next to the executable (`load_backends_from_path`),
   then lists devices with `list_llama_ggml_backend_devices()`.
 - Model parameters: the selected device(s) (`with_devices`) and the number of GPU layers (all by default).
+  - A fully offloaded model is read instead of memory-mapped. A mapping keeps the whole file in the process's memory
+    as long as the model is loaded, although the weights are in VRAM.
+    Measured with ROCm while translating: 0.8B uses 335 MiB instead of 964 MiB, and 2B 374 MiB instead of 2,142 MiB
+    (214 MiB of either is the ROCm libraries). Loading takes the same 1–2 s.
+  - On the CPU (or with partial offload) the file stays memory-mapped: those pages are the weights in use.
 - Context: `n_ctx` defaults to 16384 and can be configured up to 32768.
 - Decoding is greedy. It stops on the `<|plamo:tag|>` token, on any end-of-generation token (`<|plamo:bos|>` is the EOS),
   on cancellation, when the context is full, or when the output runs away (6.1).

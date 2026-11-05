@@ -106,7 +106,11 @@ impl Runtime {
         params = match options.gpu {
             Some(GpuOffload { device, layers }) => params
                 .with_devices(&[device])?
-                .with_n_gpu_layers(layers.unwrap_or(u32::MAX)),
+                .with_n_gpu_layers(layers.unwrap_or(u32::MAX))
+                // With every layer on the GPU, a memory-mapped file would keep a second copy of
+                // the weights in the process's memory for as long as the model is loaded. Read
+                // it instead, so the host copy is freed once the weights are uploaded.
+                .with_use_mmap(layers.is_some()),
             None => params.with_n_gpu_layers(0),
         };
         let model = LlamaModel::load_from_file(&self.backend, path, &params)?;
