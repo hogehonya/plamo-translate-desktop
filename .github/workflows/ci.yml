@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  linux:
+    name: Linux (CPU, static)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev \
+            libx11-xcb-dev libssl-dev libzstd-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --release -- -D warnings
+      - run: cargo test --workspace --release
+      - run: cargo build --workspace --release --bins --examples
+
+      - name: Package
+        run: |
+          dist=dist/plamo-translate-desktop
+          mkdir -p "$dist"
+          cp target/release/plamo-translate-desktop target/release/examples/translate "$dist/"
+          tar -C dist -czf plamo-translate-desktop-linux-x86_64.tar.gz plamo-translate-desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plamo-translate-desktop-linux-x86_64
+          path: plamo-translate-desktop-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows (CPU + Vulkan, dynamic backends)
+    runs-on: windows-2025
+    env:
+      VULKAN_VERSION: 1.4.363.1
+      # A short target directory keeps llama.cpp's nested CMake build paths under MAX_PATH.
+      CARGO_TARGET_DIR: D:\t
+      FEATURES: engine/vulkan,engine/dynamic-backends
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
+          curl.exe -fsSL -o $installer "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          Start-Process -FilePath $installer -Wait -NoNewWindow `
+            -ArgumentList '--accept-licenses', '--default-answer', '--confirm-command', 'install'
+          $sdk = "C:\VulkanSDK\$env:VULKAN_VERSION"
+          if (-not (Test-Path "$sdk\Bin\glslc.exe")) { throw "Vulkan SDK was not installed to $sdk" }
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            D:\t
+          key: windows-${{ env.VULKAN_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: windows-${{ env.VULKAN_VERSION }}-
+
+      - run: cargo clippy --workspace --all-targets --release --features $env:FEATURES -- -D warnings
+      - run: cargo test --workspace --release --features $env:FEATURES
+      - run: cargo build --workspace --release --bins --examples --features $env:FEATURES
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:CARGO_TARGET_DIR 'release'
+          $dist = 'dist\plamo-translate-desktop'
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item "$release\plamo-translate-desktop.exe", "$release\examples\translate.exe" $dist
+          # llama.cpp shared libraries (llama.dll, ggml.dll, ggml-base.dll, ...).
+          Copy-Item "$release\*.dll" $dist
+          # ggml backend modules (CPU variants, Vulkan) from the newest llama-cpp-sys-2 build.
+          $out = Get-ChildItem "$release\build\llama-cpp-sys-2-*\out\backends" -Directory |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $out) { throw 'ggml backend modules not found' }
+          Copy-Item "$($out.FullName)\*.dll" $dist
+          Get-ChildItem $dist | Format-Table Name, Length
+          Compress-Archive -Path $dist -DestinationPath plamo-translate-desktop-windows-x86_64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plamo-translate-desktop-windows-x86_64
+          path: plamo-translate-desktop-windows-x86_64.zip

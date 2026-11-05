@@ -28,7 +28,10 @@ pub struct RuntimeOptions {
     /// Forward llama.cpp logs to `tracing` instead of discarding them.
     pub logs: bool,
     /// Directory holding ggml backend modules (`dynamic-backends` builds only).
-    /// Defaults to the directory of the current executable.
+    ///
+    /// Defaults to the directory of the current executable, which is where a packaged app keeps
+    /// them. If no backend loads from there, the build output directory is tried, so
+    /// `cargo run` works without packaging.
     pub backends_dir: Option<PathBuf>,
 }
 
@@ -49,6 +52,9 @@ impl Runtime {
             });
             if let Some(dir) = dir {
                 llama_cpp_2::llama_backend::load_backends_from_path(&dir);
+            }
+            if llama_cpp_2::list_llama_ggml_backend_devices().is_empty() {
+                llama_cpp_2::llama_backend::load_backends();
             }
         }
         #[cfg(not(feature = "dynamic-backends"))]

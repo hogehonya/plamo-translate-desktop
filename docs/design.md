@@ -228,8 +228,16 @@ the auto-translate flag, the window geometry, and the license acceptance record.
   - The `gpui-pre-windows` build script compiles its HLSL shaders with `fxc.exe` only when the build host is Windows.
   - Release builds then `include!` the generated shader bytes, so a Linux-hosted release build cannot compile.
 - CI runs on every push and pull request (Windows and Linux) and runs build, tests, clippy, and rustfmt.
-- A tag push publishes release artifacts:
-  - Windows: a portable zip with the exe, the `ggml-*.dll` backend modules, and the licenses.
+- Build configurations:
+  - Windows: features `engine/vulkan` and `engine/dynamic-backends`. llama.cpp is built as DLLs
+    (`llama.dll`, `ggml*.dll`), and the backend modules (CPU variants and Vulkan) sit next to the exe.
+    A machine without a working Vulkan driver simply does not list a Vulkan device.
+  - Linux: llama.cpp is linked statically and runs on the CPU only for now. With `dynamic-backends` on Linux,
+    llama-cpp-sys-2 copies the versioned `.so` symlinks without their targets, so the libraries need custom packaging.
+    That packaging is deferred to M5, and Linux users who want a GPU build it themselves with `--features engine/vulkan`.
+- Every CI run uploads the packaged builds as workflow artifacts.
+- A tag push publishes release artifacts (M5):
+  - Windows: a portable zip with the exe, the DLLs and backend modules, and the licenses.
   - Linux: a tar.gz (an AppImage comes later).
 - Windows-specific behaviour (DirectX rendering, IME, Vulkan performance on real hardware) is checked by running CI artifacts on the Windows host.
   Once the app is feature-complete, the repo is also built and run locally on Windows.
