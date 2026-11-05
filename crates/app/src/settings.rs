@@ -46,6 +46,18 @@ pub struct Settings {
     /// Glossary text, one `source = target` per line.
     pub glossary: String,
     pub ui_language: UiLanguage,
+    pub theme: ThemeSetting,
+}
+
+/// Light or dark appearance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeSetting {
+    /// Follow the operating system, including later changes.
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 /// Language of the user interface.
@@ -172,6 +184,9 @@ mod tests {
         assert_eq!(s.ui_language, super::UiLanguage::System);
         let s: Settings = serde_json::from_str(r#"{"ui_language":"japanese"}"#).unwrap();
         assert_eq!(s.ui_language, super::UiLanguage::Japanese);
+        assert_eq!(s.theme, super::ThemeSetting::System);
+        let s: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(s.theme, super::ThemeSetting::Dark);
     }
 
     #[test]

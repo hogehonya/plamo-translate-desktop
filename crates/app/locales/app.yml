@@ -382,6 +382,18 @@ settings.language:
 settings.language_system:
   en: "System (%{lang})"
   ja: "システムに合わせる（%{lang}）"
+settings.theme:
+  en: Theme
+  ja: テーマ
+settings.theme_system:
+  en: System
+  ja: システムに合わせる
+settings.theme_light:
+  en: Light
+  ja: ライト
+settings.theme_dark:
+  en: Dark
+  ja: ダーク
 
 models.quality_legend:
   en: "Quality (higher is better): Ja↔En = PFTB, multilingual = FLORES+ chrF++ (Ja↔14 languages). In parentheses: difference from the unquantized model."

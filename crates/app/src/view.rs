@@ -17,7 +17,7 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IconName, IndexPath, Selectable as _, Sizable as _,
-    StyledExt as _, TitleBar, WindowExt as _, h_flex, v_flex,
+    StyledExt as _, Theme, ThemeMode, TitleBar, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -27,7 +27,7 @@ use crate::backend::{self, BackendEvent, BackendPanel};
 use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
-use crate::settings::{self, Settings, UiLanguage};
+use crate::settings::{self, Settings, ThemeSetting, UiLanguage};
 
 actions!(translator, [CopyTranslation]);
 
@@ -47,6 +47,16 @@ const COPY_TRANSLATION_KEY: &str = "cmd-shift-c";
 #[cfg(not(target_os = "macos"))]
 const COPY_TRANSLATION_KEY: &str = "ctrl-shift-c";
 
+/// Switches between the light and dark theme, following the OS for [`ThemeSetting::System`].
+pub fn apply_theme(theme: ThemeSetting, window: &mut Window, cx: &mut App) {
+    match theme {
+        ThemeSetting::System => Theme::sync_system_appearance(Some(window), cx),
+        ThemeSetting::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+        ThemeSetting::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+    }
+    window.refresh();
+}
+
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new(
         COPY_TRANSLATION_KEY,
@@ -59,6 +69,7 @@ type SourceSelect = SelectState<SearchableVec<Choice<SourceChoice>>>;
 type TargetSelect = SelectState<SearchableVec<Choice<TargetChoice>>>;
 type StyleSelect = SelectState<Vec<Choice<StyleChoice>>>;
 type UiLanguageSelect = SelectState<Vec<Choice<UiLanguage>>>;
+type ThemeSelect = SelectState<Vec<Choice<ThemeSetting>>>;
 
 /// One translation request: the text and every option that affects its output.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +123,7 @@ pub struct TranslatorView {
     target_select: Entity<TargetSelect>,
     style_select: Entity<StyleSelect>,
     ui_language_select: Entity<UiLanguageSelect>,
+    theme_select: Entity<ThemeSelect>,
     source_choice: SourceChoice,
     target_choice: TargetChoice,
     style_choice: StyleChoice,
@@ -211,6 +223,11 @@ impl TranslatorView {
             let selected = lang::position(&choices, &settings.ui_language).map(IndexPath::new);
             cx.new(|cx| SelectState::new(choices, selected, window, cx))
         };
+        let theme_select = {
+            let choices = lang::theme_choices();
+            let selected = lang::position(&choices, &settings.theme).map(IndexPath::new);
+            cx.new(|cx| SelectState::new(choices, selected, window, cx))
+        };
 
         let backend = cx.new(|cx| BackendPanel::new(settings.backend.clone(), window, cx));
         let store = ModelStore::new(settings::models_dir());
@@ -258,6 +275,16 @@ impl TranslatorView {
             cx.subscribe_in(&ui_language_select, window, |this, _, event, window, cx| {
                 if let SelectEvent::Confirm(Some(language)) = event {
                     this.set_ui_language(*language, window, cx);
+                }
+            }),
+            cx.subscribe_in(&theme_select, window, |this, _, event, window, cx| {
+                if let SelectEvent::Confirm(Some(theme)) = event {
+                    this.set_theme(*theme, window, cx);
+                }
+            }),
+            cx.observe_window_appearance(window, |this, window, cx| {
+                if this.settings.theme == ThemeSetting::System {
+                    apply_theme(ThemeSetting::System, window, cx);
                 }
             }),
             cx.subscribe_in(&style_select, window, |this, _, event, window, cx| {
@@ -319,6 +346,7 @@ impl TranslatorView {
             target_select,
             style_select,
             ui_language_select,
+            theme_select,
             source_choice,
             target_choice,
             style_choice,
@@ -580,22 +608,41 @@ impl TranslatorView {
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let language = self.ui_language_select.clone();
+        let theme = self.theme_select.clone();
         window.open_dialog(cx, move |dialog, _, _| {
+            let row = |label: &str, select: AnyElement| {
+                h_flex()
+                    .gap_3()
+                    .text_sm()
+                    .child(div().w(px(120.)).child(t!(label).into_owned()))
+                    .child(select)
+            };
             dialog
                 .title(t!("settings.title").into_owned())
                 .w(px(480.))
                 .child(
-                    h_flex()
+                    v_flex()
                         .gap_3()
-                        .text_sm()
-                        .child(
-                            div()
-                                .w(px(120.))
-                                .child(t!("settings.language").into_owned()),
-                        )
-                        .child(Select::new(&language).w(px(260.))),
+                        .child(row(
+                            "settings.language",
+                            Select::new(&language).w(px(260.)).into_any_element(),
+                        ))
+                        .child(row(
+                            "settings.theme",
+                            Select::new(&theme).w(px(260.)).into_any_element(),
+                        )),
                 )
         });
+    }
+
+    fn set_theme(&mut self, theme: ThemeSetting, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings.theme == theme {
+            return;
+        }
+        self.settings.theme = theme;
+        self.settings.save();
+        crate::app_log!("theme set to {theme:?}");
+        apply_theme(theme, window, cx);
     }
 
     fn set_ui_language(
@@ -635,6 +682,11 @@ impl TranslatorView {
         self.ui_language_select.update(cx, |state, cx| {
             state.set_items(lang::ui_language_choices(), window, cx);
             state.set_selected_value(&language, window, cx);
+        });
+        let theme = self.settings.theme;
+        self.theme_select.update(cx, |state, cx| {
+            state.set_items(lang::theme_choices(), window, cx);
+            state.set_selected_value(&theme, window, cx);
         });
         for (input, key) in [
             (&self.source, "source.placeholder"),

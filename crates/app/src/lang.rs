@@ -5,7 +5,7 @@ use gpui_kit::SharedString;
 use gpui_kit::component::select::SelectItem;
 use rust_i18n::t;
 
-use crate::settings::UiLanguage;
+use crate::settings::{ThemeSetting, UiLanguage};
 
 /// Source language choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +173,18 @@ pub fn ui_language_choices() -> Vec<Choice<UiLanguage>> {
         Choice::new(UiLanguage::English, "English".to_owned(), &[]),
         Choice::new(UiLanguage::Japanese, "日本語".to_owned(), &[]),
     ]
+}
+
+/// Appearance options.
+pub fn theme_choices() -> Vec<Choice<ThemeSetting>> {
+    [
+        (ThemeSetting::System, "settings.theme_system"),
+        (ThemeSetting::Light, "settings.theme_light"),
+        (ThemeSetting::Dark, "settings.theme_dark"),
+    ]
+    .into_iter()
+    .map(|(value, key)| Choice::new(value, t!(key).into_owned(), &[]))
+    .collect()
 }
 
 pub fn style_choices() -> Vec<Choice<StyleChoice>> {

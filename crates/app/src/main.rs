@@ -16,7 +16,7 @@ mod view;
 
 use std::path::PathBuf;
 
-use gpui_kit::component::{Theme, TitleBar};
+use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 use crate::view::TranslatorView;
@@ -66,7 +66,7 @@ fn main() {
                 ..TitleBar::window_options()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
-                Theme::sync_system_appearance(Some(window), cx);
+                view::apply_theme(settings.theme, window, cx);
                 cx.new(|cx| TranslatorView::new(custom_model, settings, window, cx))
             })
             .expect("failed to open the main window");

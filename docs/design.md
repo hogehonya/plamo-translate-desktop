@@ -303,7 +303,8 @@ The first implementation is `LlamaCppBackend`:
 - Streaming keeps the output pane's scroll position, so a reader can scroll through a long translation while it grows.
   A new translation starts at the top.
 - Japanese IME input must work on both platforms. This is checked in M0.
-- Theme follows the OS. Light and dark come from gpui-kit.
+- Theme: Settings → Theme (System, Light, or Dark). System follows the OS, including changes while the app runs.
+  The light and dark themes come from gpui-kit.
 - UI strings live in `crates/app/locales/app.yml`. The language is the first that applies of:
   1. `PLAMO_LANG` (a development override).
   2. Settings → Display language (System, English, or 日本語).

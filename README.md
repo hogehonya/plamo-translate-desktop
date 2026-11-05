@@ -20,6 +20,7 @@ locally on your computer. It works offline once a model is downloaded. Written i
   - Newly published files are picked up from Hugging Face without an app update.
 - Runs on the CPU (AVX2 or AVX-512) or on a GPU through Vulkan. Linux source builds can also use ROCm. The device is selectable, and automatic selection picks the discrete GPU.
 - English and Japanese UI. It follows the OS language by default and can be changed under Settings (the gear in the status bar). `PLAMO_LANG=ja` or `en` overrides both.
+- Light and dark themes. The default follows the OS; Settings can fix either one.
 
 Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation.
 
