@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use engine::StopReason;
 use engine::llama::{Device, RuntimeOptions, SessionOptions};
@@ -139,6 +139,9 @@ pub struct TranslatorView {
     shown: Option<Request>,
     translation: String,
     cache: VecDeque<(Request, String)>,
+    /// Tokens received for the current job, and when the first one arrived (for the live rate).
+    stream_tokens: usize,
+    stream_started: Option<Instant>,
 
     /// Set by the paste hook so the following change translates without debouncing.
     paste_pending: bool,
@@ -336,6 +339,8 @@ impl TranslatorView {
             shown: None,
             translation: String::new(),
             cache: VecDeque::new(),
+            stream_tokens: 0,
+            stream_started: None,
             paste_pending: false,
             copied: false,
             debounce: Task::ready(()),
@@ -759,6 +764,8 @@ impl TranslatorView {
             self.worker
                 .translate(request.options.clone(), request.text.clone()),
         );
+        self.stream_tokens = 0;
+        self.stream_started = None;
         self.shown = Some(request);
         self.status = Status::Translating {
             target,
@@ -811,6 +818,8 @@ impl TranslatorView {
                 Event::Token { job, text } => {
                     if self.current_job == Some(job) {
                         pending.push_str(&text);
+                        self.stream_tokens += 1;
+                        self.stream_started.get_or_insert_with(Instant::now);
                     }
                 }
                 other => {
@@ -965,6 +974,14 @@ impl TranslatorView {
         self.translate_now(window, cx);
     }
 
+    /// Generation rate of the running job, measured from the first received token.
+    /// It includes prompt processing between chunks of a long text.
+    fn live_tokens_per_second(&self) -> Option<f64> {
+        let elapsed = self.stream_started?.elapsed().as_secs_f64();
+        (elapsed >= 0.3 && self.stream_tokens > 1)
+            .then(|| (self.stream_tokens - 1) as f64 / elapsed)
+    }
+
     fn status_text(&self) -> String {
         match &self.status {
             Status::NoModel => t!("status.no_model").into_owned(),
@@ -974,11 +991,15 @@ impl TranslatorView {
             }
             Status::Ready => t!("status.ready").into_owned(),
             Status::Translating { target, chunk } => {
-                let text = t!("status.translating", lang = lang::language_name(target));
-                match chunk {
-                    Some((current, total)) => format!("{text} ({current}/{total})"),
-                    None => text.into_owned(),
+                let mut text =
+                    t!("status.translating", lang = lang::language_name(target)).into_owned();
+                if let Some((current, total)) = chunk {
+                    text.push_str(&format!(" ({current}/{total})"));
                 }
+                if let Some(rate) = self.live_tokens_per_second() {
+                    text.push_str(&format!(" · {rate:.1} tok/s"));
+                }
+                text
             }
             Status::Done { tokens_per_second } => {
                 t!("status.done", speed = format!("{tokens_per_second:.1}")).into_owned()
