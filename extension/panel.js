@@ -24,6 +24,7 @@ for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el
 for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
   el.placeholder = t(el.dataset.i18nPlaceholder);
 }
+for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
 $("output").append(outputNode);
 
 for (const code of TARGETS) $("target").add(new Option(t(`lang_${code.replace("-", "_")}`), code));
@@ -71,6 +72,25 @@ $("source").addEventListener("keydown", (e) => {
     translate($("source").value);
   }
 });
+$("release").addEventListener("click", release);
+
+// Ends the host, which frees the model's memory (and the app's files); the next translation
+// starts it again.
+function release() {
+  if (!port) return;
+  if (currentId !== null) {
+    finish();
+    $("progress").textContent = t("stopped");
+  }
+  // Closing our end does not fire onDisconnect, so update the UI here.
+  port.disconnect();
+  port = null;
+  status = null;
+  hideNotice();
+  setStatus(t("statusReleased"));
+  $("release").disabled = true;
+}
+
 $("copy").addEventListener("click", async () => {
   await navigator.clipboard.writeText(outputNode.data);
   $("copy").textContent = t("copied");
@@ -99,12 +119,14 @@ function takeRequest(request) {
 
 function connect() {
   port = chrome.runtime.connectNative(HOST);
+  $("release").disabled = false;
   port.onMessage.addListener(onMessage);
   // The host loads a model only after this, so the app's model is not loaded in vain.
   port.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
   port.onDisconnect.addListener(() => {
     const error = chrome.runtime.lastError?.message ?? "";
     port = null;
+    $("release").disabled = true;
     if (currentId !== null) finish();
     // The host could not be started: it is not registered, or the app was moved.
     showNotice(/not found|forbidden|exited/i.test(error) ? t("noticeSetup") : t("noticeDisconnected", error));

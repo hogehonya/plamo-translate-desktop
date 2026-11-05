@@ -174,5 +174,14 @@
   },
   "settingsHint": {
     "message": "ダウンロード済みのモデルから選べます。ほかのモデルは PLaMo Translate Desktop でダウンロードしてください。ここで変えても、アプリ側の選択は変わりません。"
+  },
+  "release": {
+    "message": "解放"
+  },
+  "releaseTitle": {
+    "message": "PLaMo Translate Desktop との接続を切って、モデルが使っているメモリ（GPU メモリを含む）を解放します。次に翻訳するときに読み込み直します。"
+  },
+  "statusReleased": {
+    "message": "解放しました · 次の翻訳で読み込み直します"
   }
 }

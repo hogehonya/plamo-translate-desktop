@@ -76,7 +76,9 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
 
 The browser starts the host while the panel is open. It uses the model and device selected in the app unless you choose others
 under **Model and device** in the panel (any downloaded model; downloads stay in the app). It loads its own copy of the model,
-so with the app open as well the model is in memory twice. If you move the app's folder, choose Connect again.
+so with the app open as well the model is in memory twice, and each browser window with the panel open runs its own host.
+Closing the panel, or **Release** in it, ends the host and frees the memory; the next translation loads the model again.
+To update the app in place, close the panels and the app first (the host keeps its files open). If you move the app's folder, choose Connect again.
 Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
 
 ## Building from source

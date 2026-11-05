@@ -54,6 +54,7 @@ select, button, textarea {
 select, button { padding: 4px 8px; }
 button { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }
+button.small { padding: 1px 6px; font-size: 12px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { background: var(--error); border-color: var(--error); color: #fff; }
 textarea { width: 100%; padding: 8px; resize: vertical; max-height: 50vh; }

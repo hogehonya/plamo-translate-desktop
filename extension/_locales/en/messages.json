@@ -174,5 +174,14 @@
   },
   "settingsHint": {
     "message": "Downloaded models are listed; download others in PLaMo Translate Desktop. Changing these does not change the app's own selection."
+  },
+  "release": {
+    "message": "Release"
+  },
+  "releaseTitle": {
+    "message": "End the connection to PLaMo Translate Desktop and free the model's memory. The next translation loads it again."
+  },
+  "statusReleased": {
+    "message": "Released · loads again on the next translation"
   }
 }

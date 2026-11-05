@@ -464,8 +464,12 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     the host loads nothing before the first request, so the app's model is not loaded only to be replaced.
     Writing them into the app's settings would have been undone by the app's next save.
   - A new request supersedes the running one, as in the app; the superseded one ends with `done { stopped }`.
+- The host lives as long as the panel's port: closing the panel, or Release in it, ends the host and frees the model's memory and the app's files
+  (which Windows keeps locked while the host runs). The next request starts it again.
 - Limits:
   - The host loads its own copy of the model, so with the app open the model is in memory twice. Relaying to a running app would avoid that.
+  - Each window's side panel is its own page with its own port, so each runs a host. Holding one port in the service worker would share it,
+    but then the host (and the model) would stay until released explicitly.
   - Browsers installed as Snap or Flatpak packages on Linux cannot start programs outside their sandbox.
   - Firefox would need its own manifest format (`allowed_extensions`) and an extension build for it.
 - Translating without the desktop app (WASM llama.cpp or WebGPU in the extension) is possible later; it would be much slower and limited to the small models.
