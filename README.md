@@ -79,6 +79,9 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
    which can be resumed later.
    **Pages** under **Settings** in the panel shows translations below the original instead.
 
+The extension's texts (the panel, the menus, and the box on the page) follow the browser's language;
+**Display language** under **Settings** in the panel sets English or Japanese instead, independently of the app.
+
 The host uses the model and device selected in the app unless you choose others under **Settings** in the panel
 (any downloaded model; downloads stay in the app). It loads its own copy of the model, so with the app open as well the model is in memory twice.
 It ends, freeing the memory, after 5 minutes without use or when you choose **Release** in the panel; the next translation starts it again.

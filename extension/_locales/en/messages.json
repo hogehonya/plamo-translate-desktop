@@ -2,6 +2,10 @@
   "name": {
     "message": "PLaMo Translate"
   },
+  "locale": {
+    "message": "en",
+    "description": "This locale's folder in _locales; the extension uses it to tell which locale the browser picked."
+  },
   "description": {
     "message": "Translate text in the browser with PLaMo 3 Translate running locally in PLaMo Translate Desktop."
   },
@@ -198,6 +202,17 @@
   },
   "pageMode_below": {
     "message": "Show below the original"
+  },
+  "uiLanguage": {
+    "message": "Display language"
+  },
+  "uiLanguageAuto": {
+    "message": "Same as the browser ($LANG$)",
+    "placeholders": {
+      "lang": {
+        "content": "$1"
+      }
+    }
   },
   "pageNotAllowed": {
     "message": "This page cannot be translated from the panel without permission. Right-click the page and choose \"Translate this page with PLaMo\", or allow the extension on all sites."

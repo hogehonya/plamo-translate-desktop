@@ -445,6 +445,10 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     It has no GPUI dependency. It is a console program on Windows too, since Chrome starts hosts through `cmd.exe` with the window hidden.
   - The extension: context menu items for selected text ("Translate with PLaMo", shown in the side panel) and for the whole page,
     the side panel, and `page.js` for page translation.
+  - Texts come from `_locales` through `i18n.js` (shared by the panel, the background, and `page.js`). They follow the browser
+    (`chrome.i18n`) unless the panel's display language picks a locale, whose `messages.json` is then read and filled in the same way;
+    `page.js` gets those messages from the background (`ui_messages`) instead of reading the files itself.
+    The manifest's name and description always follow the browser.
   - The background service worker (`background.js`) holds the one native port and shares it: panel translations start at once
     (interrupting a page batch, whose unfinished paragraphs go back to the queue), and page paragraphs go to the host in batches
     of up to 10 paragraphs or 2,000 characters while nothing else runs. Chrome keeps the worker alive while the port is open.

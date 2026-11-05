@@ -2,6 +2,10 @@
   "name": {
     "message": "PLaMo Translate"
   },
+  "locale": {
+    "message": "ja",
+    "description": "This locale's folder in _locales; the extension uses it to tell which locale the browser picked."
+  },
   "description": {
     "message": "PLaMo Translate Desktop の PLaMo 3 Translate で、ブラウザの文章を手元のパソコンで翻訳します。"
   },
@@ -198,6 +202,17 @@
   },
   "pageMode_below": {
     "message": "原文の下に表示"
+  },
+  "uiLanguage": {
+    "message": "表示言語"
+  },
+  "uiLanguageAuto": {
+    "message": "ブラウザに合わせる（$LANG$）",
+    "placeholders": {
+      "lang": {
+        "content": "$1"
+      }
+    }
   },
   "pageNotAllowed": {
     "message": "パネルからこのページを翻訳するには許可が必要です。ページを右クリックして「このページを PLaMo で翻訳」を選ぶか、すべてのサイトでの実行を許可してください。"

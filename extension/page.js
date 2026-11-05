@@ -13,8 +13,6 @@
     return;
   }
 
-  const t = (key, ...args) => chrome.i18n.getMessage(key, args) || key;
-
   // Not translated, nor looked into.
   const SKIP = new Set([
     "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "TEXTAREA", "INPUT", "SELECT", "OPTION", "BUTTON",
@@ -300,10 +298,7 @@
         undo: root.querySelector(".undo"),
         close: root.querySelector(".close"),
       };
-      ui.stop.textContent = t("stop");
-      ui.resume.textContent = t("pageResume");
       ui.resume.onclick = () => start();
-      ui.undo.textContent = t("pageUndo");
       ui.stop.onclick = stop;
       ui.undo.onclick = undo;
       ui.close.onclick = () => {
@@ -312,6 +307,10 @@
       };
       document.documentElement.append(host);
     }
+    // Labelled on each render: the display language may change between page translations.
+    ui.stop.textContent = t("stop");
+    ui.resume.textContent = t("pageResume");
+    ui.undo.textContent = t("pageUndo");
     const working = pending.size > 0;
     ui.text.textContent = message ?? (working ? t("pageProgress", String(done), String(total)) : t("pageDone", String(done)));
     ui.stop.hidden = !working;
@@ -373,7 +372,12 @@
 
   async function start() {
     stopped = false;
-    const settings = await chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" });
+    const [settings, messages] = await Promise.all([
+      chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" }),
+      // The display language's messages, for t() in i18n.js (injected with this file).
+      chrome.runtime.sendMessage({ type: "ui_messages" }).catch(() => null),
+    ]);
+    uiMessages = messages;
     mode = settings.pageMode;
     style = settings.style;
     target = settings.target;

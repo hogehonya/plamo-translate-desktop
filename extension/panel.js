@@ -1,6 +1,7 @@
 // Side panel: translates text through the background (background.js), which holds the
 // connection to the desktop app's browser host, and shows the translation as it streams in.
 // It also starts page translation (page.js) and holds the extension's settings.
+// Texts come from i18n.js (`t`), in the display language chosen here or the browser's.
 
 // Target languages, as in the app: Japanese ⇄ English, the model's 53 languages, and easy
 // Japanese (experimental). Names come from the app's locale file (lang_* messages).
@@ -14,7 +15,6 @@ const STYLES = ["", "polite", "plain"];
 const PAGE_MODES = ["replace", "below"];
 
 const $ = (id) => document.getElementById(id);
-const t = (key, ...args) => chrome.i18n.getMessage(key, args) || key;
 const langName = (code) => t(`lang_${code.replaceAll("-", "_").replace("(easy)", "_easy")}`);
 
 let port = null;
@@ -24,32 +24,31 @@ let choices = { model: "", device: "" };
 /** The translation shown: true while waiting for the background to accept it, then its id. */
 let currentId = null;
 let outputNode = document.createTextNode("");
+// What the status line, the progress line, and the notice show, kept to show it again when the
+// display language changes. Texts are functions giving them in the current language.
+let shownStatus = null;
+let shownOptions = null;
+let progress = () => "";
+let notice = null;
 
-// ---- UI setup ----
-
-for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
-for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
-  el.placeholder = t(el.dataset.i18nPlaceholder);
-}
-for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
 $("output").append(outputNode);
 
-for (const code of TARGETS) $("target").add(new Option(langName(code), code));
-for (const style of STYLES) $("style").add(new Option(t(`style_${style || "default"}`), style));
-for (const mode of PAGE_MODES) $("pageMode").add(new Option(t(`pageMode_${mode}`), mode));
+// ---- Settings ----
 
-chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" }).then((saved) => {
-  $("target").value = saved.target;
-  $("style").value = saved.style;
-  $("pageMode").value = saved.pageMode;
-  updateStyleVisibility();
-});
 $("target").addEventListener("change", () => {
   chrome.storage.local.set({ target: $("target").value });
   updateStyleVisibility();
 });
 $("style").addEventListener("change", () => chrome.storage.local.set({ style: $("style").value }));
 $("pageMode").addEventListener("change", () => chrome.storage.local.set({ pageMode: $("pageMode").value }));
+$("uiLanguage").addEventListener("change", () => chrome.storage.local.set({ uiLanguage: $("uiLanguage").value }));
+// Applied here as in panels of other windows (and in the background, for its menus).
+chrome.storage.local.onChanged.addListener(async (changes) => {
+  if (!changes.uiLanguage) return;
+  const uiLanguage = await loadUiLanguage();
+  applyLanguage();
+  $("uiLanguage").value = uiLanguage;
+});
 
 for (const id of ["model", "device"]) {
   $(id).addEventListener("change", () => {
@@ -64,6 +63,45 @@ function updateStyleVisibility() {
   const target = $("target").value;
   $("style").hidden = !(target === "ja" || target === "auto");
 }
+
+/** Shows every text in the display language: at startup and when the language changes. */
+function applyLanguage() {
+  document.documentElement.lang = uiLocale();
+  for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
+
+  fill($("target"), TARGETS, langName);
+  fill($("style"), STYLES, (style) => t(`style_${style || "default"}`));
+  fill($("pageMode"), PAGE_MODES, (mode) => t(`pageMode_${mode}`));
+  const browser = UI_LANGUAGES[chrome.i18n.getMessage("locale")] ?? "";
+  fill($("uiLanguage"), ["auto", ...Object.keys(UI_LANGUAGES)], (lang) =>
+    lang === "auto" ? t("uiLanguageAuto", browser) : UI_LANGUAGES[lang],
+  );
+  if (shownOptions) {
+    // Keeps the choices made since the host's options arrived.
+    const model = $("model").value;
+    const device = $("device").value;
+    renderOptions(shownOptions);
+    $("model").value = model;
+    $("device").value = device;
+  }
+  if (shownStatus) renderStatus(shownStatus);
+  setTranslating(currentId !== null);
+  $("progress").textContent = progress();
+  if (notice) renderNotice();
+}
+
+/** Fills `select` with `values`, labelled by `label`, keeping its selection. */
+function fill(select, values, label) {
+  const selected = select.value;
+  select.replaceChildren(...values.map((value) => new Option(label(value), value)));
+  if (values.includes(selected)) select.value = selected;
+}
+
+// ---- Actions ----
 
 $("translate").addEventListener("click", () => {
   if (currentId !== null) {
@@ -92,8 +130,18 @@ $("copy").addEventListener("click", async () => {
   setTimeout(() => ($("copy").textContent = t("copy")), 1200);
 });
 
-// The saved choices are needed before the host is first contacted.
-const ready = chrome.storage.local.get({ choices }).then((saved) => {
+// The display language comes before any text is shown, and the saved choices before the host
+// is first contacted.
+const ready = Promise.all([
+  loadUiLanguage(),
+  chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", choices }),
+]).then(([uiLanguage, saved]) => {
+  applyLanguage();
+  $("uiLanguage").value = uiLanguage;
+  $("target").value = saved.target;
+  $("style").value = saved.style;
+  $("pageMode").value = saved.pageMode;
+  updateStyleVisibility();
   choices = { ...choices, ...saved.choices };
 });
 
@@ -133,7 +181,7 @@ function translate(text) {
   hideNotice();
   currentId = true;
   outputNode.data = "";
-  $("progress").textContent = "";
+  setProgress(() => "");
   $("copy").disabled = true;
   setTranslating(true);
   send({ type: "translate", text, target: $("target").value, style: $("style").value || undefined });
@@ -143,6 +191,9 @@ function onMessage(message) {
   switch (message.type) {
     case "status":
       renderStatus(message);
+      if (message.state === "disconnected" && message.message) {
+        showNotice(() => (setupNeeded(message.message) ? t("noticeSetup") : t("noticeDisconnected", message.message)));
+      }
       return;
     case "options":
       renderOptions(message);
@@ -153,9 +204,13 @@ function onMessage(message) {
     case "page_failed":
       // Without the activeTab grant (the context menu or the toolbar button gives it), the
       // page can be reached only with permission for its site.
-      showNotice(t("pageNotAllowed"), t("allowAllSites"), async () => {
-        if (await chrome.permissions.request({ origins: ["<all_urls>"] })) translatePage();
-      });
+      showNotice(
+        () => t("pageNotAllowed"),
+        () => t("allowAllSites"),
+        async () => {
+          if (await chrome.permissions.request({ origins: ["<all_urls>"] })) translatePage();
+        },
+      );
       return;
     case "page_started":
       return;
@@ -163,10 +218,10 @@ function onMessage(message) {
   if (message.id !== currentId) return;
   switch (message.type) {
     case "started":
-      $("progress").textContent = t("translatingInto", langName(message.target));
+      setProgress(() => t("translatingInto", langName(message.target)));
       break;
     case "progress":
-      if (message.count > 1) $("progress").textContent = `${message.index + 1} / ${message.count}`;
+      if (message.count > 1) setProgress(() => `${message.index + 1} / ${message.count}`);
       break;
     case "text":
       outputNode.appendData(message.text);
@@ -176,15 +231,17 @@ function onMessage(message) {
       outputNode.data = outputNode.data.slice(0, message.length);
       break;
     case "done":
-      $("progress").textContent = message.stopped
-        ? t("stopped")
-        : message.cut > 0
-          ? t("doneCut", String(message.cut))
-          : t("done", String(message.tokens));
+      setProgress(() =>
+        message.stopped
+          ? t("stopped")
+          : message.cut > 0
+            ? t("doneCut", String(message.cut))
+            : t("done", String(message.tokens)),
+      );
       finish();
       break;
     case "error":
-      showNotice(errorText(message));
+      showNotice(() => errorText(message));
       finish();
       break;
   }
@@ -217,6 +274,7 @@ function setupNeeded(error) {
 // ---- Rendering ----
 
 function renderOptions(options) {
+  shownOptions = options;
   const gb = (bytes) => `${(bytes / 1e9).toFixed(2)} GB`;
   const model = $("model");
   model.replaceChildren(new Option(t("followApp", options.app_model ?? t("none")), ""));
@@ -235,6 +293,7 @@ function renderOptions(options) {
 }
 
 function renderStatus(status) {
+  shownStatus = status;
   const model = [status.model, status.device].filter(Boolean).join(" · ");
   $("release").disabled = status.state === "released" || status.state === "disconnected";
   switch (status.state) {
@@ -253,7 +312,6 @@ function renderStatus(status) {
       break;
     case "disconnected":
       setStatus(t("statusDisconnected"), true);
-      if (status.message) showNotice(setupNeeded(status.message) ? t("noticeSetup") : t("noticeDisconnected", status.message));
       break;
     default:
       setStatus(status.message ?? t("statusError"), true);
@@ -266,6 +324,12 @@ function setStatus(text, isError = false, detail = "") {
   $("status").classList.toggle("error", isError);
 }
 
+/** Shows the progress line; `text` gives it in the current language. */
+function setProgress(text) {
+  progress = text;
+  $("progress").textContent = text();
+}
+
 function setTranslating(translating) {
   const button = $("translate");
   button.textContent = translating ? t("stop") : t("translate");
@@ -273,17 +337,26 @@ function setTranslating(translating) {
   button.classList.toggle("danger", translating);
 }
 
-/** Shows `text`, with a button running `action` if `label` is given. */
-function showNotice(text, label, action) {
-  $("noticeText").textContent = text;
+/**
+ * Shows a notice, with a button running `action` if `label` is given. `text` and `label` give
+ * their texts in the current language.
+ */
+function showNotice(text, label = null, action = null) {
+  notice = { text, label, action };
+  renderNotice();
+}
+
+function renderNotice() {
+  $("noticeText").textContent = notice.text();
   const button = $("noticeAction");
-  button.hidden = !label;
-  button.textContent = label ?? "";
-  button.onclick = action ?? null;
+  button.hidden = !notice.label;
+  button.textContent = notice.label?.() ?? "";
+  button.onclick = notice.action;
   $("notice").hidden = false;
 }
 
 function hideNotice() {
+  notice = null;
   $("notice").hidden = true;
 }
 

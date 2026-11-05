@@ -8,6 +8,9 @@
 //   host in small batches while nothing else is running.
 // - The connection closes after IDLE_MS without work, which ends the host and frees the
 //   model's memory. Chrome keeps this service worker alive while the connection is open.
+// - The context menus and page.js show texts in the display language chosen in the panel.
+
+importScripts("i18n.js");
 
 const HOST = "com.github.tanakh.plamo_translate";
 const IDLE_MS = 5 * 60 * 1000;
@@ -15,6 +18,10 @@ const BATCH_SEGMENTS = 10;
 const BATCH_CHARS = 2000;
 const MENU_SELECTION = "translate-selection";
 const MENU_PAGE = "translate-page";
+const MENUS = [
+  { id: MENU_SELECTION, message: "menuTranslate", contexts: ["selection"] },
+  { id: MENU_PAGE, message: "menuTranslatePage", contexts: ["page"] },
+];
 
 let host = null;
 let idleTimer = null;
@@ -225,7 +232,8 @@ function onPanelMessage(port, message) {
 // ---- Page translation ----
 
 async function translatePage(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ["page.js"] });
+  // page.js asks for the display language's messages ("ui_messages") when it starts.
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["i18n.js", "page.js"] });
 }
 
 function onPageMessage(port, message) {
@@ -300,17 +308,25 @@ chrome.runtime.onConnect.addListener((port) => {
   }
 });
 
+// The display language, read again when the panel changes it.
+let languageReady = loadUiLanguage();
+chrome.storage.local.onChanged.addListener((changes) => {
+  if (!changes.uiLanguage) return;
+  languageReady = loadUiLanguage().then(() => {
+    for (const { id, message } of MENUS) chrome.contextMenus.update(id, { title: t(message) }).catch(() => {});
+  });
+});
+
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: MENU_SELECTION,
-    title: chrome.i18n.getMessage("menuTranslate"),
-    contexts: ["selection"],
+  languageReady.then(() => {
+    for (const { id, message, contexts } of MENUS) chrome.contextMenus.create({ id, title: t(message), contexts });
   });
-  chrome.contextMenus.create({
-    id: MENU_PAGE,
-    title: chrome.i18n.getMessage("menuTranslatePage"),
-    contexts: ["page"],
-  });
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "ui_messages") return false;
+  languageReady.then(() => sendResponse(uiMessages ?? null));
+  return true;
 });
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
