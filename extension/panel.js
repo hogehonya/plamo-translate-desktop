@@ -1,22 +1,23 @@
-// Side panel: sends text to the desktop app's browser host over native messaging and shows the
-// translation as it streams in. The host protocol is described in crates/host/src/protocol.rs.
-
-const HOST = "com.github.tanakh.plamo_translate";
+// Side panel: translates text through the background (background.js), which holds the
+// connection to the desktop app's browser host, and shows the translation as it streams in.
+// It also starts page translation (page.js) and holds the extension's settings.
 
 // Target languages offered here; the host accepts any of the model's 53 codes.
 const TARGETS = ["auto", "ja", "en", "zh-hans", "zh-hant", "ko", "fr", "de", "es", "it", "pt", "ru", "vi", "th", "id"];
 const STYLES = ["", "polite", "plain"];
+const PAGE_MODES = ["replace", "below"];
 
 const $ = (id) => document.getElementById(id);
 const t = (key, ...args) => chrome.i18n.getMessage(key, args) || key;
+const langName = (code) => t(`lang_${code.replace("-", "_")}`);
 
 let port = null;
-// The model and device chosen here ("" follows the app); sent whenever the host starts.
+// The model and device chosen here ("" follows the app); the background sends them whenever
+// it starts the host.
 let choices = { model: "", device: "" };
-let nextId = 1;
+/** The translation shown: true while waiting for the background to accept it, then its id. */
 let currentId = null;
 let outputNode = document.createTextNode("");
-let status = null;
 
 // ---- UI setup ----
 
@@ -27,12 +28,14 @@ for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
 for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
 $("output").append(outputNode);
 
-for (const code of TARGETS) $("target").add(new Option(t(`lang_${code.replace("-", "_")}`), code));
+for (const code of TARGETS) $("target").add(new Option(langName(code), code));
 for (const style of STYLES) $("style").add(new Option(t(`style_${style || "default"}`), style));
+for (const mode of PAGE_MODES) $("pageMode").add(new Option(t(`pageMode_${mode}`), mode));
 
-chrome.storage.local.get({ target: "auto", style: "" }).then(({ target, style }) => {
-  $("target").value = target;
-  $("style").value = style;
+chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" }).then((saved) => {
+  $("target").value = saved.target;
+  $("style").value = saved.style;
+  $("pageMode").value = saved.pageMode;
   updateStyleVisibility();
 });
 $("target").addEventListener("change", () => {
@@ -40,17 +43,14 @@ $("target").addEventListener("change", () => {
   updateStyleVisibility();
 });
 $("style").addEventListener("change", () => chrome.storage.local.set({ style: $("style").value }));
+$("pageMode").addEventListener("change", () => chrome.storage.local.set({ pageMode: $("pageMode").value }));
 
 for (const id of ["model", "device"]) {
   $(id).addEventListener("change", () => {
     choices[id] = $(id).value;
     chrome.storage.local.set({ choices });
-    configure();
+    send({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
   });
-}
-
-function configure() {
-  send({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
 }
 
 function updateStyleVisibility() {
@@ -72,25 +72,14 @@ $("source").addEventListener("keydown", (e) => {
     translate($("source").value);
   }
 });
-$("release").addEventListener("click", release);
+$("release").addEventListener("click", () => send({ type: "release" }));
+$("translatePage").addEventListener("click", translatePage);
 
-// Ends the host, which frees the model's memory (and the app's files); the next translation
-// starts it again.
-function release() {
-  if (!port) return;
-  if (currentId !== null) {
-    finish();
-    $("progress").textContent = t("stopped");
-  }
-  // Closing our end does not fire onDisconnect, so update the UI here.
-  port.disconnect();
-  port = null;
-  status = null;
+async function translatePage() {
   hideNotice();
-  setStatus(t("statusReleased"));
-  $("release").disabled = true;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id != null) send({ type: "translate_page", tabId: tab.id });
 }
-
 $("copy").addEventListener("click", async () => {
   await navigator.clipboard.writeText(outputNode.data);
   $("copy").textContent = t("copied");
@@ -115,23 +104,17 @@ function takeRequest(request) {
   translate(request.text);
 }
 
-// ---- Native messaging ----
+// ---- Talking to the background ----
 
 function connect() {
-  port = chrome.runtime.connectNative(HOST);
-  $("release").disabled = false;
+  port = chrome.runtime.connect({ name: "panel" });
   port.onMessage.addListener(onMessage);
-  // The host loads a model only after this, so the app's model is not loaded in vain.
-  port.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+  // The background stops when idle; connect again on the next message.
   port.onDisconnect.addListener(() => {
-    const error = chrome.runtime.lastError?.message ?? "";
     port = null;
-    $("release").disabled = true;
     if (currentId !== null) finish();
-    // The host could not be started: it is not registered, or the app was moved.
-    showNotice(/not found|forbidden|exited/i.test(error) ? t("noticeSetup") : t("noticeDisconnected", error));
-    setStatus(t("statusDisconnected"), true);
   });
+  port.postMessage({ type: "hello" });
 }
 
 function send(message) {
@@ -142,59 +125,61 @@ function send(message) {
 function translate(text) {
   if (!text.trim()) return;
   hideNotice();
-  currentId = nextId++;
+  currentId = true;
   outputNode.data = "";
   $("progress").textContent = "";
   $("copy").disabled = true;
   setTranslating(true);
-  send({
-    type: "translate",
-    id: currentId,
-    text,
-    target: $("target").value,
-    style: $("style").value || undefined,
-  });
+  send({ type: "translate", text, target: $("target").value, style: $("style").value || undefined });
 }
 
 function onMessage(message) {
   switch (message.type) {
     case "status":
-      status = message;
-      renderStatus();
-      break;
+      renderStatus(message);
+      return;
     case "options":
       renderOptions(message);
-      break;
+      return;
+    case "accepted":
+      if (currentId === true) currentId = message.id;
+      return;
+    case "page_failed":
+      // Without the activeTab grant (the context menu or the toolbar button gives it), the
+      // page can be reached only with permission for its site.
+      showNotice(t("pageNotAllowed"), t("allowAllSites"), async () => {
+        if (await chrome.permissions.request({ origins: ["<all_urls>"] })) translatePage();
+      });
+      return;
+    case "page_started":
+      return;
+  }
+  if (message.id !== currentId) return;
+  switch (message.type) {
     case "started":
-      if (message.id === currentId) $("progress").textContent = t("translatingInto", t(`lang_${message.target.replace("-", "_")}`));
+      $("progress").textContent = t("translatingInto", langName(message.target));
       break;
     case "progress":
-      if (message.id === currentId && message.count > 1) {
-        $("progress").textContent = `${message.index + 1} / ${message.count}`;
-      }
+      if (message.count > 1) $("progress").textContent = `${message.index + 1} / ${message.count}`;
       break;
     case "text":
-      if (message.id === currentId) outputNode.appendData(message.text);
+      outputNode.appendData(message.text);
       break;
     case "rewind":
       // Lengths are in UTF-16 code units, like JavaScript strings.
-      if (message.id === currentId) outputNode.data = outputNode.data.slice(0, message.length);
+      outputNode.data = outputNode.data.slice(0, message.length);
       break;
     case "done":
-      if (message.id === currentId) {
-        $("progress").textContent = message.stopped
-          ? t("stopped")
-          : message.cut > 0
-            ? t("doneCut", String(message.cut))
-            : t("done", String(message.tokens));
-        finish();
-      }
+      $("progress").textContent = message.stopped
+        ? t("stopped")
+        : message.cut > 0
+          ? t("doneCut", String(message.cut))
+          : t("done", String(message.tokens));
+      finish();
       break;
     case "error":
-      if (message.id == null || message.id === currentId) {
-        showNotice(errorText(message));
-        finish();
-      }
+      showNotice(errorText(message));
+      finish();
       break;
   }
 }
@@ -211,9 +196,16 @@ function errorText(message) {
       return t("errorNoModel");
     case "model_missing":
       return t("errorModelMissing");
+    case "disconnected":
+      return setupNeeded(message.message) ? t("noticeSetup") : t("noticeDisconnected", message.message ?? "");
     default:
       return t("errorFailed", message.message ?? message.code);
   }
+}
+
+/** Whether the host could not be started: not registered, or the app was moved. */
+function setupNeeded(error) {
+  return /not found|forbidden|exited/i.test(error ?? "");
 }
 
 // ---- Rendering ----
@@ -236,9 +228,9 @@ function renderOptions(options) {
   device.value = options.device ?? "";
 }
 
-function renderStatus() {
-  if (!status) return;
-  const model = [status.model?.replace(/^plamo-3-translate-/, ""), status.device].filter(Boolean).join(" · ");
+function renderStatus(status) {
+  const model = [status.model, status.device].filter(Boolean).join(" · ");
+  $("release").disabled = status.state === "released" || status.state === "disconnected";
   switch (status.state) {
     case "ready":
       setStatus(model);
@@ -249,6 +241,13 @@ function renderStatus() {
       break;
     case "no_model":
       setStatus(t("statusNoModel"), true);
+      break;
+    case "released":
+      setStatus(status.reason === "idle" ? t("statusReleasedIdle") : t("statusReleased"));
+      break;
+    case "disconnected":
+      setStatus(t("statusDisconnected"), true);
+      if (status.message) showNotice(setupNeeded(status.message) ? t("noticeSetup") : t("noticeDisconnected", status.message));
       break;
     default:
       setStatus(status.message ?? t("statusError"), true);
@@ -267,8 +266,13 @@ function setTranslating(translating) {
   button.classList.toggle("danger", translating);
 }
 
-function showNotice(text) {
-  $("notice").textContent = text;
+/** Shows `text`, with a button running `action` if `label` is given. */
+function showNotice(text, label, action) {
+  $("noticeText").textContent = text;
+  const button = $("noticeAction");
+  button.hidden = !label;
+  button.textContent = label ?? "";
+  button.onclick = action ?? null;
   $("notice").hidden = false;
 }
 
@@ -276,5 +280,5 @@ function hideNotice() {
   $("notice").hidden = true;
 }
 
-// Connect right away, with the saved choices, to show the model's state and the options.
+// Connect right away, with the saved choices, so the model loads while the user reads.
 ready.then(() => send({ type: "options" }));

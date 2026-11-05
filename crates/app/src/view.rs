@@ -1500,6 +1500,7 @@ impl TranslatorView {
             // Output of superseded jobs.
             Event::Chunk { .. }
             | Event::Token { .. }
+            | Event::Segment { .. }
             | Event::Rewind { .. }
             | Event::Retry { .. }
             | Event::Cut { .. }

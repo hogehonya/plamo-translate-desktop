@@ -271,8 +271,12 @@ mod tests {
         assert!(!looks_japanese("你好世界"));
     }
 
+    /// Serializes the tests that change the process-wide locale.
+    static LOCALE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn formats_durations() {
+        let _locale = LOCALE.lock().unwrap_or_else(|e| e.into_inner());
         rust_i18n::set_locale("en");
         assert_eq!(format_duration(Duration::from_secs(45)), "45 s");
         assert_eq!(format_duration(Duration::from_secs(75)), "1 min 15 s");
@@ -301,6 +305,7 @@ mod tests {
 
     #[test]
     fn every_language_has_a_localized_name() {
+        let _locale = LOCALE.lock().unwrap_or_else(|e| e.into_inner());
         for locale in ["en", "ja"] {
             rust_i18n::set_locale(locale);
             for l in LANGUAGES {

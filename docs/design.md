@@ -443,8 +443,12 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 - Components:
   - `plamo-translate-host` ships next to the app and shares its DLLs/shared libraries, models, and settings, so the package grows by about 1 MB.
     It has no GPUI dependency. It is a console program on Windows too, since Chrome starts hosts through `cmd.exe` with the window hidden.
-  - The extension: a context menu item ("Translate with PLaMo") for selected text and a side panel that streams the translation.
-    The panel holds the native port, so the host runs while the panel is open.
+  - The extension: context menu items for selected text ("Translate with PLaMo", shown in the side panel) and for the whole page,
+    the side panel, and `page.js` for page translation.
+  - The background service worker (`background.js`) holds the one native port and shares it: panel translations start at once
+    (interrupting a page batch, whose unfinished paragraphs go back to the queue), and page paragraphs go to the host in batches
+    of up to 10 paragraphs or 2,000 characters while nothing else runs. Chrome keeps the worker alive while the port is open.
+    The port closes after 5 minutes without work, or on Release in the panel.
 - Registration (Settings → Browser extension → Connect, `crates/app/src/browser.rs`) writes a host manifest named
   `com.github.tanakh.plamo_translate` that points to the host and allows only the extension's ID:
   - Windows: the manifest in the data directory, referenced from `HKCU\Software\{Google\Chrome,Microsoft\Edge}\NativeMessagingHosts`.
@@ -453,10 +457,10 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 - The extension's ID (`bcagbgackmnblhlofmpcmjfkfhhogpmh`) follows from the public key in its manifest, so the unpacked extension always has it.
   A Chrome Web Store release would get another ID, which must be added to `EXTENSION_IDS`.
 - Protocol (`crates/host/src/protocol.rs`): length-prefixed JSON both ways.
-  - Requests: `translate { id, text, target (code or auto), source, style }`, `cancel`, `status`, `options`,
+  - Requests: `translate { id, text, target (code or auto), source, style }`, `translate_segments { id, segments, … }`, `cancel`, `status`, `options`,
     and `configure { model, device }` (the extension's own choices; absent fields follow the app).
   - Responses: `status` (starting, loading, ready, no_model, error), `options` (downloaded models, devices, and the current choices),
-    `started`, `progress`, `text`, `rewind` (a UTF-16 length, as JavaScript counts),
+    `started`, `progress`, `text`, `segment { index, text }`, `rewind` (a UTF-16 length, as JavaScript counts),
     `done { tokens, cut, stopped }`, and `error` with a code the extension localizes.
   - The host reads the app's settings before each request and reloads when the model or device changed.
     It uses the app's glossary, chunk and history sizes, and cut marker.
@@ -464,12 +468,20 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     the host loads nothing before the first request, so the app's model is not loaded only to be replaced.
     Writing them into the app's settings would have been undone by the app's next save.
   - A new request supersedes the running one, as in the app; the superseded one ends with `done { stopped }`.
-- The host lives as long as the panel's port: closing the panel, or Release in it, ends the host and frees the model's memory and the app's files
-  (which Windows keeps locked while the host runs). The next request starts it again.
+- Closing the port ends the host and frees the model's memory and the app's files (which Windows keeps locked while the host runs).
+  The next request starts it again.
+- Page translation (`page.js`, injected on request with `activeTab`, or from the panel with the optional all-sites permission):
+  - The page is cut into runs: consecutive text and inline elements within one block. Code, line breaks, and text marked `translate="no"`
+    or `notranslate` stay as they are inside a run; `pre`, form controls, scripts, and similar are skipped, as are Japanese runs for a Japanese target.
+  - A run is sent as simple HTML whose elements carry an index instead of their attributes (`see the <a i="2">guide</a>`).
+    PLaMo 3 Translate keeps such tags in place and reorders them with the sentence (checked with 0.8B and 2B, HTML and Markdown).
+  - The translation is parsed inertly (`DOMParser`) and rebuilt from text nodes and clones of the run's own elements, looked up by index,
+    so links keep their targets and nothing the model writes can add attributes, elements, or scripts. Unknown or repeated indices keep only their text.
+  - The runs in view go first. New content (infinite scrolling) is picked up by a `MutationObserver`.
+  - Replacing (the default) or showing the translation below the original (without the copies' ids); the original nodes are kept to restore the page.
+  - The host's `translate_segments` translates the runs of a batch in order with the earlier ones as history (`engine::document::translate_segments`).
 - Limits:
   - The host loads its own copy of the model, so with the app open the model is in memory twice. Relaying to a running app would avoid that.
-  - Each window's side panel is its own page with its own port, so each runs a host. Holding one port in the service worker would share it,
-    but then the host (and the model) would stay until released explicitly.
   - Browsers installed as Snap or Flatpak packages on Linux cannot start programs outside their sandbox.
   - Firefox would need its own manifest format (`allowed_extensions`) and an extension build for it.
 - Translating without the desktop app (WASM llama.cpp or WebGPU in the extension) is possible later; it would be much slower and limited to the small models.

@@ -183,5 +183,71 @@
   },
   "statusReleased": {
     "message": "Released · loads again on the next translation"
+  },
+  "menuTranslatePage": {
+    "message": "Translate this page with PLaMo"
+  },
+  "translatePage": {
+    "message": "Translate page"
+  },
+  "translatePageTitle": {
+    "message": "Translate the page in the current tab. Right-clicking the page and choosing \"Translate this page with PLaMo\" also works."
+  },
+  "pageMode": {
+    "message": "Pages"
+  },
+  "pageMode_replace": {
+    "message": "Replace the text"
+  },
+  "pageMode_below": {
+    "message": "Show below the original"
+  },
+  "pageNotAllowed": {
+    "message": "This page cannot be translated from the panel without permission. Right-click the page and choose \"Translate this page with PLaMo\", or allow the extension on all sites."
+  },
+  "allowAllSites": {
+    "message": "Allow on all sites"
+  },
+  "statusReleasedIdle": {
+    "message": "Released after 5 minutes unused · loads again on the next translation"
+  },
+  "pageProgress": {
+    "message": "Translating… $DONE$ / $TOTAL$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "pageDone": {
+    "message": "Translated $COUNT$ paragraphs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageStopped": {
+    "message": "Stopped"
+  },
+  "pageRestored": {
+    "message": "Restored the original"
+  },
+  "pageUndo": {
+    "message": "Restore"
+  },
+  "pageError": {
+    "message": "Translation failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageNothing": {
+    "message": "Nothing to translate"
   }
 }

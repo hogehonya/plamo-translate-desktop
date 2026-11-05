@@ -126,6 +126,12 @@ fn status_message(status: &Status) -> Response {
     }
 }
 
+/// What a translation request translates.
+enum Input {
+    Text(String),
+    Segments(Vec<String>),
+}
+
 struct Host {
     worker: Worker,
     shared: Arc<(Mutex<Shared>, Condvar)>,
@@ -208,7 +214,14 @@ impl Host {
                 target,
                 source,
                 style,
-            } => self.translate(id, text, target, source, style),
+            } => self.translate(id, Input::Text(text), target, source, style),
+            Request::TranslateSegments {
+                id,
+                segments,
+                target,
+                source,
+                style,
+            } => self.translate(id, Input::Segments(segments), target, source, style),
             Request::Cancel => self.worker.cancel(),
             Request::Status => {
                 self.refresh_model();
@@ -346,7 +359,7 @@ impl Host {
     fn translate(
         &mut self,
         id: u64,
-        text: String,
+        input: Input,
         target: Option<String>,
         source: Option<String>,
         style: Option<String>,
@@ -382,11 +395,13 @@ impl Host {
 
         let target = match target.as_deref() {
             None | Some("auto") => {
-                if appdata::looks_japanese(&text) {
-                    "en"
-                } else {
-                    "ja"
-                }
+                let japanese = match &input {
+                    Input::Text(text) => appdata::looks_japanese(text),
+                    Input::Segments(segments) => {
+                        segments.iter().any(|s| appdata::looks_japanese(s))
+                    }
+                };
+                if japanese { "en" } else { "ja" }
             }
             Some(code) => code,
         };
@@ -413,7 +428,12 @@ impl Host {
             });
         }
         shared.output.clear();
-        let job = self.worker.translate(options, document, text);
+        let job = match input {
+            Input::Text(text) => self.worker.translate(options, document, text),
+            Input::Segments(segments) => {
+                self.worker.translate_segments(options, document, segments)
+            }
+        };
         shared.job = Some((job, id));
         self.send(&Response::Started { id, target });
     }
@@ -529,6 +549,11 @@ fn on_event(shared: &(Mutex<Shared>, Condvar), out: &Output, event: Event) {
         } => {
             if let Some(id) = current(&s, job) {
                 send(out, &Response::Progress { id, index, count });
+            }
+        }
+        Event::Segment { job, index, text } => {
+            if let Some(id) = current(&s, job) {
+                send(out, &Response::Segment { id, index, text });
             }
         }
         Event::Token { job, text } => {

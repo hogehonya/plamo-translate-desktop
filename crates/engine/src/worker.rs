@@ -16,7 +16,7 @@ use std::thread;
 
 use pfml::TranslationOptions;
 
-use crate::document::{DocumentOptions, Output, Progress, translate_document};
+use crate::document::{DocumentOptions, Output, Progress, translate_document, translate_segments};
 use crate::llama::{Device, Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
 use crate::{StopReason, TranslateStats};
 
@@ -57,6 +57,12 @@ pub enum Event {
         index: usize,
         count: usize,
         source: (usize, usize),
+    },
+    /// The translation of segment `index` of a [`Worker::translate_segments`] job.
+    Segment {
+        job: JobId,
+        index: usize,
+        text: String,
     },
     /// Generated text for a job, in order.
     Token {
@@ -104,6 +110,12 @@ enum Command {
         options: TranslationOptions,
         document: DocumentOptions,
         text: String,
+    },
+    TranslateSegments {
+        job: JobId,
+        options: TranslationOptions,
+        document: DocumentOptions,
+        segments: Vec<String>,
     },
 }
 
@@ -171,6 +183,24 @@ impl Worker {
         job
     }
 
+    /// Translates `segments` in order, with the earlier ones as history, reporting each one as
+    /// an [`Event::Segment`]. Cancels any earlier job, like [`Worker::translate`].
+    pub fn translate_segments(
+        &self,
+        options: TranslationOptions,
+        document: DocumentOptions,
+        segments: Vec<String>,
+    ) -> JobId {
+        let job = self.latest.fetch_add(1, Ordering::SeqCst) + 1;
+        self.send(Command::TranslateSegments {
+            job,
+            options,
+            document,
+            segments,
+        });
+        job
+    }
+
     /// Cancels the running job, if any.
     pub fn cancel(&self) {
         self.latest.fetch_add(1, Ordering::SeqCst);
@@ -214,10 +244,12 @@ fn run(
                 }
             }
             Command::Unload => events(Event::Unloaded),
-            Command::Translate { job, .. } => events(Event::Failed {
-                job,
-                error: "no model is loaded".into(),
-            }),
+            Command::Translate { job, .. } | Command::TranslateSegments { job, .. } => {
+                events(Event::Failed {
+                    job,
+                    error: "no model is loaded".into(),
+                })
+            }
         }
     }
 }
@@ -272,6 +304,34 @@ fn serve(
                 document,
                 text,
             } => (job, options, document, text),
+            Command::TranslateSegments {
+                job,
+                options,
+                document,
+                segments,
+            } => {
+                if latest.load(Ordering::SeqCst) == job {
+                    let n_ctx = session.n_ctx();
+                    let result = translate_segments(
+                        &mut session,
+                        &|s| model.count_tokens(s),
+                        n_ctx,
+                        &document,
+                        &options,
+                        &segments,
+                        &mut |index, text| events(Event::Segment { job, index, text }),
+                        &|| latest.load(Ordering::Relaxed) != job,
+                    );
+                    events(match result {
+                        Ok(stats) => Event::Finished { job, stats },
+                        Err(e) => Event::Failed {
+                            job,
+                            error: e.to_string(),
+                        },
+                    });
+                }
+                continue;
+            }
         };
         if latest.load(Ordering::SeqCst) != job {
             continue;

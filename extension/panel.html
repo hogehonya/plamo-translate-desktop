@@ -18,6 +18,7 @@
       <summary data-i18n="settings"></summary>
       <label><span data-i18n="model"></span><select id="model"></select></label>
       <label><span data-i18n="device"></span><select id="device"></select></label>
+      <label><span data-i18n="pageMode"></span><select id="pageMode"></select></label>
       <p class="hint" data-i18n="settingsHint"></p>
     </details>
 
@@ -31,11 +32,17 @@
 
     <div class="output-header">
       <span id="progress"></span>
-      <button id="copy" data-i18n="copy" disabled></button>
+      <span>
+        <button id="translatePage" class="small" data-i18n="translatePage" data-i18n-title="translatePageTitle"></button>
+        <button id="copy" class="small" data-i18n="copy" disabled></button>
+      </span>
     </div>
     <div id="output" class="output" aria-live="polite"></div>
 
-    <div id="notice" class="notice" hidden></div>
+    <div id="notice" class="notice" hidden>
+      <span id="noticeText"></span>
+      <button id="noticeAction" class="small" hidden></button>
+    </div>
 
     <footer data-i18n="builtWith"></footer>
     <script src="panel.js"></script>

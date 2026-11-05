@@ -183,5 +183,71 @@
   },
   "statusReleased": {
     "message": "解放しました · 次の翻訳で読み込み直します"
+  },
+  "menuTranslatePage": {
+    "message": "このページを PLaMo で翻訳"
+  },
+  "translatePage": {
+    "message": "ページを翻訳"
+  },
+  "translatePageTitle": {
+    "message": "今のタブのページを翻訳します。ページを右クリックして「このページを PLaMo で翻訳」を選んでも同じです。"
+  },
+  "pageMode": {
+    "message": "ページ"
+  },
+  "pageMode_replace": {
+    "message": "原文を置き換える"
+  },
+  "pageMode_below": {
+    "message": "原文の下に表示"
+  },
+  "pageNotAllowed": {
+    "message": "パネルからこのページを翻訳するには許可が必要です。ページを右クリックして「このページを PLaMo で翻訳」を選ぶか、すべてのサイトでの実行を許可してください。"
+  },
+  "allowAllSites": {
+    "message": "すべてのサイトで許可"
+  },
+  "statusReleasedIdle": {
+    "message": "5 分間使われなかったため解放しました · 次の翻訳で読み込み直します"
+  },
+  "pageProgress": {
+    "message": "翻訳中… $DONE$ / $TOTAL$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "pageDone": {
+    "message": "$COUNT$ 段落を翻訳しました",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageStopped": {
+    "message": "中止しました"
+  },
+  "pageRestored": {
+    "message": "元に戻しました"
+  },
+  "pageUndo": {
+    "message": "元に戻す"
+  },
+  "pageError": {
+    "message": "翻訳に失敗しました: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageNothing": {
+    "message": "翻訳する文章がありません"
   }
 }

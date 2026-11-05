@@ -16,6 +16,7 @@
 //! sentence, and a sentence with repetition penalized, cut if even that loops. Output that ran
 //! away never enters the history, so one loop cannot seed the next.
 
+use std::cell::RefCell;
 use std::time::Duration;
 
 use pfml::{HistoryPair, Prompt, TranslationOptions};
@@ -482,41 +483,19 @@ pub fn translate_document(
     on_progress: &mut dyn FnMut(Progress),
     is_cancelled: &dyn Fn() -> bool,
 ) -> Result<TranslateStats> {
-    let fixed = count_tokens(&options.context)
-        + options
-            .glossary
-            .iter()
-            .map(|e| count_tokens(&e.source) + count_tokens(&e.target) + 2)
-            .sum::<usize>()
-        + 64;
-    let available = n_ctx.saturating_sub(fixed).max(384);
-    let chunk_budget = (available / 6).min(document.max_chunk_tokens);
-    let history_budget = (available / 3).min(document.max_history_tokens);
-
+    let (chunk_budget, history_budget) = budgets(count_tokens, n_ctx, document, options);
     let split = split(text, chunk_budget, count_tokens);
-    let mut translator = Translator {
+    let mut translator = Translator::new(
         text,
-        cut_marker: &document.cut_marker,
         backend,
         count_tokens,
+        document,
         options,
+        history_budget,
         sink,
         on_progress,
         is_cancelled,
-        history: Vec::new(),
-        history_costs: Vec::new(),
-        history_budget,
-        emitted: 0,
-        total: TranslateStats {
-            prompt_tokens: 0,
-            generated_tokens: 0,
-            prompt_duration: Duration::ZERO,
-            generation_duration: Duration::ZERO,
-            stop_reason: StopReason::Finished,
-            retries: 0,
-            cut: 0,
-        },
-    };
+    );
     if split.chunks.is_empty() {
         return Ok(translator.total);
     }
@@ -541,8 +520,89 @@ pub fn translate_document(
     Ok(translator.total)
 }
 
+/// Translates `segments` (separate texts, such as the paragraphs of a web page) in order, each
+/// one like [`translate_document`] and with the earlier ones as history. `on_segment` receives
+/// each translation when it is complete. Stops at the first segment that is cancelled or does
+/// not fit.
+#[allow(clippy::too_many_arguments)]
+pub fn translate_segments(
+    backend: &mut dyn TranslationBackend,
+    count_tokens: &dyn Fn(&str) -> usize,
+    n_ctx: usize,
+    document: &DocumentOptions,
+    options: &TranslationOptions,
+    segments: &[String],
+    on_segment: &mut dyn FnMut(usize, String),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<TranslateStats> {
+    let (chunk_budget, history_budget) = budgets(count_tokens, n_ctx, document, options);
+    // The output of all segments; each one's translation is the part it added.
+    let output = RefCell::new(String::new());
+    let mut sink = |o: Output<'_>| {
+        let mut output = output.borrow_mut();
+        match o {
+            Output::Text(text) => output.push_str(text),
+            Output::Truncate(len) => output.truncate(len),
+        }
+    };
+    let mut on_progress = |_: Progress| {};
+    let mut translator = Translator::new(
+        "",
+        backend,
+        count_tokens,
+        document,
+        options,
+        history_budget,
+        &mut sink,
+        &mut on_progress,
+        is_cancelled,
+    );
+    let mut chunk_index = 0;
+    for (index, segment) in segments.iter().enumerate() {
+        translator.text = segment;
+        let start = translator.emitted;
+        let split = split(segment, chunk_budget, count_tokens);
+        translator.emit(split.leading);
+        for chunk in &split.chunks {
+            let reason = translator.chunk(chunk_index, chunk.text)?;
+            chunk_index += 1;
+            translator.total.stop_reason = reason;
+            if reason != StopReason::Finished {
+                return Ok(translator.total);
+            }
+            translator.emit(chunk.separator);
+        }
+        let translation = output.borrow()[start..].to_owned();
+        on_segment(index, translation);
+    }
+    Ok(translator.total)
+}
+
+/// Chunk and history budgets: of what remains of `n_ctx` after the fixed parts (context and
+/// glossary, plus a margin), a chunk gets at most a sixth and history a third, and `document`
+/// caps both further.
+fn budgets(
+    count_tokens: &dyn Fn(&str) -> usize,
+    n_ctx: usize,
+    document: &DocumentOptions,
+    options: &TranslationOptions,
+) -> (usize, usize) {
+    let fixed = count_tokens(&options.context)
+        + options
+            .glossary
+            .iter()
+            .map(|e| count_tokens(&e.source) + count_tokens(&e.target) + 2)
+            .sum::<usize>()
+        + 64;
+    let available = n_ctx.saturating_sub(fixed).max(384);
+    (
+        (available / 6).min(document.max_chunk_tokens),
+        (available / 3).min(document.max_history_tokens),
+    )
+}
+
 struct Translator<'a> {
-    /// The whole text; every piece translated is a slice of it.
+    /// The text being translated; every piece translated is a slice of it.
     text: &'a str,
     cut_marker: &'a str,
     backend: &'a mut dyn TranslationBackend,
@@ -560,7 +620,44 @@ struct Translator<'a> {
     total: TranslateStats,
 }
 
-impl Translator<'_> {
+impl<'a> Translator<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        text: &'a str,
+        backend: &'a mut dyn TranslationBackend,
+        count_tokens: &'a dyn Fn(&str) -> usize,
+        document: &'a DocumentOptions,
+        options: &'a TranslationOptions,
+        history_budget: usize,
+        sink: &'a mut dyn FnMut(Output<'_>),
+        on_progress: &'a mut dyn FnMut(Progress),
+        is_cancelled: &'a dyn Fn() -> bool,
+    ) -> Self {
+        Self {
+            text,
+            cut_marker: &document.cut_marker,
+            backend,
+            count_tokens,
+            options,
+            sink,
+            on_progress,
+            is_cancelled,
+            history: Vec::new(),
+            history_costs: Vec::new(),
+            history_budget,
+            emitted: 0,
+            total: TranslateStats {
+                prompt_tokens: 0,
+                generated_tokens: 0,
+                prompt_duration: Duration::ZERO,
+                generation_duration: Duration::ZERO,
+                stop_reason: StopReason::Finished,
+                retries: 0,
+                cut: 0,
+            },
+        }
+    }
+
     fn emit(&mut self, text: &str) {
         if !text.is_empty() {
             self.emitted += text.len();
@@ -1038,6 +1135,40 @@ mod tests {
                 .iter()
                 .any(|p| matches!(p, Progress::Cut { output: (0, 8), .. }))
         );
+    }
+
+    #[test]
+    fn translates_segments_in_order_with_history() {
+        let mut backend = Upper::new();
+        let options = TranslationOptions::new(pfml::LangCode::new("en").unwrap());
+        let segments = vec![
+            "first one.".to_owned(),
+            "".to_owned(),
+            "LOOP two.".to_owned(),
+        ];
+        let mut results = vec![];
+        let stats = translate_segments(
+            &mut backend,
+            &chars,
+            100_000,
+            &DocumentOptions::default(),
+            &options,
+            &segments,
+            &mut |i, text| results.push((i, text)),
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(
+            results,
+            [
+                (0, "FIRST ONE.".to_owned()),
+                (1, String::new()),
+                (2, "LOOP TWO.".to_owned())
+            ]
+        );
+        // The looping segment was retried; the third prompt has the first pair as history.
+        assert_eq!(stats.retries, 1);
+        assert!(backend.prompts[1].contains("<|plamo:msg|>FIRST ONE."));
     }
 
     #[test]

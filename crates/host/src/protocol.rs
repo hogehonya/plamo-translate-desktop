@@ -27,6 +27,19 @@ pub enum Request {
         #[serde(default)]
         style: Option<String>,
     },
+    /// Translate `segments` (such as the paragraphs of a page) in order, with the earlier ones
+    /// as history; each translation comes back as a `segment` response. Other fields as for
+    /// `translate`.
+    TranslateSegments {
+        id: u64,
+        segments: Vec<String>,
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
+        style: Option<String>,
+    },
     /// Stop the running translation.
     Cancel,
     /// Report the model and its state.
@@ -94,6 +107,8 @@ pub enum Response {
     Progress { id: u64, index: usize, count: usize },
     /// Text to append to the translation.
     Text { id: u64, text: String },
+    /// The complete translation of segment `index` of a `translate_segments` request.
+    Segment { id: u64, index: usize, text: String },
     /// Keep only the first `length` UTF-16 code units of the translation: output that ran away
     /// is being translated again.
     Rewind { id: u64, length: usize },
