@@ -295,8 +295,9 @@ pub struct TranslatorView {
     /// bar shows next.
     cuts: Vec<CutMark>,
     next_cut: usize,
-    /// The alignment of the shown translation, keyed by its length and chunk count.
-    alignment: Option<((usize, usize), Alignment)>,
+    /// The alignment of the shown translation, keyed by its length, its chunk count, and whether
+    /// it is complete.
+    alignment: Option<((usize, usize, bool), Alignment)>,
     /// Incremented when the source text changes; the alignment holds only while it matches
     /// `shown_version`.
     source_version: u64,
@@ -1389,10 +1390,11 @@ impl TranslatorView {
         if self.source_version != self.shown_version || self.chunks.is_empty() {
             return None;
         }
-        let key = (self.translation.len(), self.chunks.len());
+        let complete = self.current_job.is_none();
+        let key = (self.translation.len(), self.chunks.len(), complete);
         if self.alignment.as_ref().map(|(k, _)| *k) != Some(key) {
             let source = &self.shown.as_ref()?.text;
-            let alignment = Alignment::new(source, &self.translation, &self.chunks);
+            let alignment = Alignment::new(source, &self.translation, &self.chunks, complete);
             self.alignment = Some((key, alignment));
         }
         self.alignment.as_ref().map(|(_, a)| a)

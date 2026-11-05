@@ -2,8 +2,9 @@
 //!
 //! Long texts are translated chunk by chunk, so the start of every chunk is a known pair of
 //! positions. Within a chunk, paragraphs are paired when the source and the translation have the
-//! same number of them, which is the usual case; otherwise the chunk is one segment. Positions
-//! inside a segment map proportionally.
+//! same number of them, which is the usual case; otherwise the chunk is one segment. The chunk
+//! still being translated pairs the paragraphs translated so far, in order. Positions inside a
+//! segment map proportionally.
 
 use std::ops::Range;
 
@@ -38,9 +39,11 @@ pub struct Alignment {
 
 impl Alignment {
     /// Aligns `output`, the translation of `source` so far, using the chunks it was made of.
-    pub fn new(source: &str, output: &str, chunks: &[ChunkSpan]) -> Self {
+    /// Unless `complete`, the last chunk is still being translated.
+    pub fn new(source: &str, output: &str, chunks: &[ChunkSpan], complete: bool) -> Self {
         let mut segments = Vec::new();
         for (i, chunk) in chunks.iter().enumerate() {
+            let in_progress = !complete && i + 1 == chunks.len();
             let output_end = chunks
                 .get(i + 1)
                 .map_or(output.len(), |next| next.output_start)
@@ -50,7 +53,12 @@ impl Alignment {
             let output_range = chunk.output_start.min(output_end)..output_end;
             let source_paragraphs = paragraphs(source, source_range.clone());
             let output_paragraphs = paragraphs(output, output_range.clone());
-            if source_paragraphs.len() > 1 && source_paragraphs.len() == output_paragraphs.len() {
+            if in_progress {
+                // The paragraphs translated so far, the last one perhaps partly.
+                segments.extend(source_paragraphs.into_iter().zip(output_paragraphs));
+            } else if source_paragraphs.len() > 1
+                && source_paragraphs.len() == output_paragraphs.len()
+            {
                 segments.extend(source_paragraphs.into_iter().zip(output_paragraphs));
             } else if !output_range.is_empty() {
                 segments.push((source_range, trim(output, output_range)));
@@ -93,10 +101,15 @@ impl Alignment {
         Some(floor_char_boundary(other, target.min(other.len())))
     }
 
-    /// The range on the other side that corresponds to the segment containing `offset`.
+    /// The range on the other side that corresponds to the segment containing `offset`, or
+    /// `None` past the last segment (source text not translated yet).
     pub fn counterpart(&self, side: Side, offset: usize) -> Option<Range<usize>> {
         let index = self.segment_index(side, offset)?;
-        Some(Self::range(&self.segments[index], side.other()).clone())
+        let segment = &self.segments[index];
+        if index + 1 == self.segments.len() && offset > Self::range(segment, side).end {
+            return None;
+        }
+        Some(Self::range(segment, side.other()).clone())
     }
 }
 
@@ -172,7 +185,7 @@ mod tests {
             source: 0..source.len(),
             output_start: 0,
         }];
-        let a = Alignment::new(source, output, &chunks);
+        let a = Alignment::new(source, output, &chunks, true);
         assert_eq!(a.segments.len(), 3);
         // "Two" maps to "二".
         let two = source.find("Two").unwrap();
@@ -198,7 +211,7 @@ mod tests {
                 output_start: output.find("次").unwrap(),
             },
         ];
-        let a = Alignment::new(source, output, &chunks);
+        let a = Alignment::new(source, output, &chunks, true);
         assert_eq!(a.segments.len(), 2);
         // The middle of the first chunk maps to the middle of its translation, on a character
         // boundary.
@@ -219,12 +232,39 @@ mod tests {
             source: 0..source.len(),
             output_start: 0,
         }];
-        let a = Alignment::new(source, output, &chunks);
+        let a = Alignment::new(source, output, &chunks, true);
         assert_eq!(a.segments.len(), 3);
         let third = source.find("三").unwrap();
         assert_eq!(
             a.map(Side::Source, third, output),
             output.find("Line three")
+        );
+    }
+
+    #[test]
+    fn pairs_the_paragraphs_translated_so_far() {
+        let source = "One.\n\nTwo.\n\nThree.";
+        // The translation has reached the middle of the second paragraph.
+        let output = "一。\n\n二";
+        let chunks = [ChunkSpan {
+            source: 0..source.len(),
+            output_start: 0,
+        }];
+        let a = Alignment::new(source, output, &chunks, false);
+        assert_eq!(a.segments.len(), 2);
+        assert_eq!(
+            a.counterpart(Side::Source, source.find("Two").unwrap()),
+            Some(output.find("二").unwrap()..output.len())
+        );
+        // Not translated yet.
+        assert_eq!(
+            a.counterpart(Side::Source, source.find("Three").unwrap()),
+            None
+        );
+        // Once complete, the same counts would fall back to the whole chunk.
+        assert_eq!(
+            Alignment::new(source, output, &chunks, true).segments.len(),
+            1
         );
     }
 

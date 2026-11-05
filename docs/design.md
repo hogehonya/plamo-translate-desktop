@@ -326,6 +326,7 @@ The first implementation is `LlamaCppBackend`:
 - Synchronized scrolling (Settings, on by default; `crates/app/src/align.rs`):
   - Chunk starts are known pairs of source and output positions. Within a chunk, paragraphs (blank-line separated, or lines in text without blank lines)
     are paired when both sides have the same number; otherwise the chunk is one segment. Positions inside a segment map proportionally.
+    The chunk still being translated pairs the paragraphs translated so far, in order; its untranslated paragraphs have no counterpart.
   - Scrolling a pane scrolls the other so the counterpart of its first visible line is at the top.
     Moving the caret selects the counterpart paragraph in the other pane, level with the caret; each pane keeps its selection visible while the other has focus.
   - A pane that was scrolled to follow ignores its own changes for 150 ms, so the two do not chase each other.
