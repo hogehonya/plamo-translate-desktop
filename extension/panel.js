@@ -243,7 +243,7 @@ function renderStatus(status) {
       setStatus(t("statusNoModel"), true);
       break;
     case "released":
-      setStatus(status.reason === "idle" ? t("statusReleasedIdle") : t("statusReleased"));
+      setStatus(status.reason === "idle" ? t("statusReleasedIdle") : t("statusReleased"), false, t("statusReleasedDetail"));
       break;
     case "disconnected":
       setStatus(t("statusDisconnected"), true);
@@ -254,8 +254,9 @@ function renderStatus(status) {
   }
 }
 
-function setStatus(text, isError = false) {
+function setStatus(text, isError = false, detail = "") {
   $("status").textContent = text;
+  $("status").title = detail;
   $("status").classList.toggle("error", isError);
 }
 

@@ -182,7 +182,7 @@
     "message": "PLaMo Translate Desktop との接続を切って、モデルが使っているメモリ（GPU メモリを含む）を解放します。次に翻訳するときに読み込み直します。"
   },
   "statusReleased": {
-    "message": "解放しました · 次の翻訳で読み込み直します"
+    "message": "解放済み"
   },
   "menuTranslatePage": {
     "message": "このページを PLaMo で翻訳"
@@ -209,7 +209,7 @@
     "message": "すべてのサイトで許可"
   },
   "statusReleasedIdle": {
-    "message": "5 分間使われなかったため解放しました · 次の翻訳で読み込み直します"
+    "message": "解放済み（5 分間未使用）"
   },
   "pageProgress": {
     "message": "翻訳中… $DONE$ / $TOTAL$",
@@ -252,5 +252,8 @@
   },
   "pageResume": {
     "message": "再開"
+  },
+  "statusReleasedDetail": {
+    "message": "次に翻訳するときに、モデルを読み込み直します。"
   }
 }

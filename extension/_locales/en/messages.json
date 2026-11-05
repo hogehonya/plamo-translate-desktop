@@ -182,7 +182,7 @@
     "message": "End the connection to PLaMo Translate Desktop and free the model's memory. The next translation loads it again."
   },
   "statusReleased": {
-    "message": "Released · loads again on the next translation"
+    "message": "Released"
   },
   "menuTranslatePage": {
     "message": "Translate this page with PLaMo"
@@ -209,7 +209,7 @@
     "message": "Allow on all sites"
   },
   "statusReleasedIdle": {
-    "message": "Released after 5 minutes unused · loads again on the next translation"
+    "message": "Released (unused for 5 minutes)"
   },
   "pageProgress": {
     "message": "Translating… $DONE$ / $TOTAL$",
@@ -252,5 +252,8 @@
   },
   "pageResume": {
     "message": "Resume"
+  },
+  "statusReleasedDetail": {
+    "message": "The model loads again on the next translation."
   }
 }
