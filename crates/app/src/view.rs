@@ -1,6 +1,7 @@
 //! The main translator window.
 
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -90,6 +91,15 @@ type UiLanguageSelect = SelectState<Vec<Choice<UiLanguage>>>;
 type ThemeSelect = SelectState<Vec<Choice<ThemeSetting>>>;
 type TokensSelect = SelectState<Vec<Choice<usize>>>;
 
+/// What the window shows about the source text. Computing it scans the whole text, which is
+/// too slow to do on every frame for a long document.
+#[derive(Debug, Clone, Copy)]
+struct SourceInfo {
+    chars: usize,
+    is_empty: bool,
+    looks_japanese: bool,
+}
+
 /// One translation request: the text and every option that affects its output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Request {
@@ -174,6 +184,10 @@ pub struct TranslatorView {
     /// The request whose result is shown (or being produced) in the output pane.
     shown: Option<Request>,
     translation: String,
+    /// Length of `translation` in UTF-16 code units, the unit of text input ranges.
+    translation_utf16: usize,
+    /// Derived from the source text when it last changed, instead of on every frame.
+    source_info: Option<SourceInfo>,
     cache: VecDeque<(Request, String)>,
     /// Tokens received for the current job, and when the first one arrived (for the live rate).
     stream_tokens: usize,
@@ -426,6 +440,8 @@ impl TranslatorView {
             current_job: None,
             shown: None,
             translation: String::new(),
+            translation_utf16: 0,
+            source_info: None,
             cache: VecDeque::new(),
             stream_tokens: 0,
             stream_started: None,
@@ -824,6 +840,7 @@ impl TranslatorView {
     ) {
         match event {
             InputEvent::Change => {
+                self.source_info = None;
                 if std::mem::take(&mut self.paste_pending) {
                     self.translate_now(window, cx);
                 } else if self.auto_translate {
@@ -930,34 +947,71 @@ impl TranslatorView {
 
     /// Replaces the output and scrolls it back to the top.
     fn set_translation(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.translation_utf16 = text.encode_utf16().count();
         self.translation = text;
         let text = SharedString::from(self.translation.clone());
         self.output
             .update(cx, |state, cx| state.set_value(text, window, cx));
     }
 
-    /// Shows newly streamed text, keeping the reader's scroll position.
+    /// Shows newly streamed text, keeping the reader's scroll position and selection.
     fn append_translation(&mut self, piece: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let end = self.translation_utf16;
         self.translation.push_str(piece);
-        self.show_streamed(window, cx);
+        self.translation_utf16 += piece.encode_utf16().count();
+        self.edit_output(end..end, piece, window, cx);
     }
 
     /// Withdraws streamed text after `len` bytes: output that ran away is being retried.
     fn rewind_translation(&mut self, len: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if len < self.translation.len() && self.translation.is_char_boundary(len) {
-            self.translation.truncate(len);
-            self.show_streamed(window, cx);
+        if len >= self.translation.len() || !self.translation.is_char_boundary(len) {
+            return;
         }
+        let removed = self.translation[len..].encode_utf16().count();
+        let end = self.translation_utf16;
+        self.translation.truncate(len);
+        self.translation_utf16 = end - removed;
+        self.edit_output(end - removed..end, "", window, cx);
     }
 
-    fn show_streamed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = SharedString::from(self.translation.clone());
+    /// Replaces `range_utf16` of the output pane with `text`.
+    ///
+    /// Only the changed range is edited. Setting the whole value instead lays out the entire
+    /// translation again, which takes longer the longer it grows and eventually stalls the UI.
+    fn edit_output(
+        &mut self,
+        range_utf16: Range<usize>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.output.update(cx, |state, cx| {
-            // `set_value` scrolls to the start; restore where the reader was.
             let offset = state.scroll_offset();
-            state.set_value(text, window, cx);
+            let selected = state.selected_range();
+            let reversed = state.is_selection_reversed();
+            // The pane is read-only for the user; programmatic edits go through the input
+            // handler, which honours that flag.
+            state.set_readonly(false, cx);
+            state.replace_text_in_range(Some(range_utf16), text, window, cx);
+            state.set_readonly(true, cx);
+            // An edit moves the caret to its end; put the reader's selection back.
+            let len = state.text().len();
+            let selected = selected.start.min(len)..selected.end.min(len);
+            state.set_selected_range_with_direction(selected, reversed, cx);
             state.set_scroll_offset(offset, cx);
         });
+    }
+
+    /// The source text's character count and language, computed once per change.
+    fn source_info(&mut self, cx: &App) -> SourceInfo {
+        *self.source_info.get_or_insert_with(|| {
+            let text = self.source.read(cx).value();
+            SourceInfo {
+                chars: text.chars().count(),
+                is_empty: text.is_empty(),
+                looks_japanese: lang::looks_japanese(&text),
+            }
+        })
     }
 
     /// Stops the running translation, keeping what has been translated so far.
@@ -1145,6 +1199,7 @@ impl TranslatorView {
             let text = SharedString::from(self.translation.clone());
             self.source
                 .update(cx, |state, cx| state.set_value(text, window, cx));
+            self.source_info = None;
         }
         self.translate_now(window, cx);
         cx.notify();
@@ -1176,6 +1231,7 @@ impl TranslatorView {
             state.set_value("", window, cx);
             state.focus(window, cx);
         });
+        self.source_info = None;
         self.translate_now(window, cx);
     }
 
@@ -1227,9 +1283,9 @@ impl TranslatorView {
 
 impl Render for TranslatorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let source_text = self.source_text(cx);
-        let char_count = source_text.chars().count();
-        let shows_style = self.target_choice.resolve(&source_text) == "ja";
+        let source = self.source_info(cx);
+        let char_count = source.chars;
+        let shows_style = self.target_choice.resolve_for(source.looks_japanese) == "ja";
         let view = cx.entity().downgrade();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -1368,7 +1424,7 @@ impl Render for TranslatorView {
                             .xsmall()
                             .icon(IconName::Close)
                             .label(t!("action.clear").into_owned())
-                            .disabled(source_text.is_empty())
+                            .disabled(source.is_empty)
                             .on_click(cx.listener(|this, _, window, cx| this.clear(window, cx))),
                     ),
             );

@@ -35,9 +35,14 @@ pub enum TargetChoice {
 impl TargetChoice {
     /// The concrete target language for `text`.
     pub fn resolve(self, text: &str) -> &'static str {
+        self.resolve_for(looks_japanese(text))
+    }
+
+    /// [`Self::resolve`] for a text where [`looks_japanese`] is already known.
+    pub fn resolve_for(self, source_is_japanese: bool) -> &'static str {
         match self {
             Self::Lang(code) => code,
-            Self::JapaneseEnglish if looks_japanese(text) => "en",
+            Self::JapaneseEnglish if source_is_japanese => "en",
             Self::JapaneseEnglish => "ja",
         }
     }
