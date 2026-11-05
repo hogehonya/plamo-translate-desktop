@@ -2,14 +2,20 @@
 // connection to the desktop app's browser host, and shows the translation as it streams in.
 // It also starts page translation (page.js) and holds the extension's settings.
 
-// Target languages offered here; the host accepts any of the model's 53 codes.
-const TARGETS = ["auto", "ja", "en", "zh-hans", "zh-hant", "ko", "fr", "de", "es", "it", "pt", "ru", "vi", "th", "id"];
+// Target languages, as in the app: Japanese ⇄ English, the model's 53 languages, and easy
+// Japanese (experimental). Names come from the app's locale file (lang_* messages).
+const TARGETS = [
+  "auto", "ja", "en", "zh-hans", "zh-hant", "ko", "ar", "az", "be", "bg", "bn", "ca", "ceb", "de",
+  "es", "et", "eu", "fa", "fr", "gu", "he", "hi", "hr", "hu", "hy", "id", "it", "jv", "ka", "kk",
+  "km", "lt", "lv", "ml", "mr", "ms", "my", "ne", "nl", "pa", "pl", "ru", "si", "sk", "sl", "sr",
+  "sw", "ta", "te", "th", "tl", "ur", "uz", "vi", "ja(easy)",
+];
 const STYLES = ["", "polite", "plain"];
 const PAGE_MODES = ["replace", "below"];
 
 const $ = (id) => document.getElementById(id);
 const t = (key, ...args) => chrome.i18n.getMessage(key, args) || key;
-const langName = (code) => t(`lang_${code.replace("-", "_")}`);
+const langName = (code) => t(`lang_${code.replaceAll("-", "_").replace("(easy)", "_easy")}`);
 
 let port = null;
 // The model and device chosen here ("" follows the app); the background sends them whenever

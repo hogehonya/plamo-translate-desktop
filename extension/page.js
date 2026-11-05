@@ -118,7 +118,7 @@
     const text = runText(run);
     if (text.length < 2 || !LETTER.test(text)) return false;
     // Already Japanese. (Other languages cannot be told apart this cheaply.)
-    return !(target === "ja" && KANA.test(text));
+    return !(target.startsWith("ja") && KANA.test(text));
   }
 
   // ---- Serializing and rebuilding ----

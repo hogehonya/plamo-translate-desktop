@@ -134,9 +134,6 @@
   "lang_it": {
     "message": "イタリア語"
   },
-  "lang_pt": {
-    "message": "ポルトガル語"
-  },
   "lang_ru": {
     "message": "ロシア語"
   },
@@ -255,5 +252,128 @@
   },
   "statusReleasedDetail": {
     "message": "次に翻訳するときに、モデルを読み込み直します。"
+  },
+  "lang_ja_easy": {
+    "message": "やさしい日本語（実験的）"
+  },
+  "lang_ar": {
+    "message": "アラビア語"
+  },
+  "lang_az": {
+    "message": "アゼルバイジャン語"
+  },
+  "lang_be": {
+    "message": "ベラルーシ語"
+  },
+  "lang_bg": {
+    "message": "ブルガリア語"
+  },
+  "lang_bn": {
+    "message": "ベンガル語"
+  },
+  "lang_ca": {
+    "message": "カタルーニャ語"
+  },
+  "lang_ceb": {
+    "message": "セブアノ語"
+  },
+  "lang_et": {
+    "message": "エストニア語"
+  },
+  "lang_eu": {
+    "message": "バスク語"
+  },
+  "lang_fa": {
+    "message": "ペルシア語"
+  },
+  "lang_gu": {
+    "message": "グジャラート語"
+  },
+  "lang_he": {
+    "message": "ヘブライ語"
+  },
+  "lang_hi": {
+    "message": "ヒンディー語"
+  },
+  "lang_hr": {
+    "message": "クロアチア語"
+  },
+  "lang_hu": {
+    "message": "ハンガリー語"
+  },
+  "lang_hy": {
+    "message": "アルメニア語"
+  },
+  "lang_jv": {
+    "message": "ジャワ語"
+  },
+  "lang_ka": {
+    "message": "ジョージア語"
+  },
+  "lang_kk": {
+    "message": "カザフ語"
+  },
+  "lang_km": {
+    "message": "クメール語"
+  },
+  "lang_lt": {
+    "message": "リトアニア語"
+  },
+  "lang_lv": {
+    "message": "ラトビア語"
+  },
+  "lang_ml": {
+    "message": "マラヤーラム語"
+  },
+  "lang_mr": {
+    "message": "マラーティー語"
+  },
+  "lang_ms": {
+    "message": "マレー語"
+  },
+  "lang_my": {
+    "message": "ビルマ語"
+  },
+  "lang_ne": {
+    "message": "ネパール語"
+  },
+  "lang_nl": {
+    "message": "オランダ語"
+  },
+  "lang_pa": {
+    "message": "パンジャブ語"
+  },
+  "lang_pl": {
+    "message": "ポーランド語"
+  },
+  "lang_si": {
+    "message": "シンハラ語"
+  },
+  "lang_sk": {
+    "message": "スロバキア語"
+  },
+  "lang_sl": {
+    "message": "スロベニア語"
+  },
+  "lang_sr": {
+    "message": "セルビア語"
+  },
+  "lang_sw": {
+    "message": "スワヒリ語"
+  },
+  "lang_ta": {
+    "message": "タミル語"
+  },
+  "lang_te": {
+    "message": "テルグ語"
+  },
+  "lang_tl": {
+    "message": "タガログ語"
+  },
+  "lang_ur": {
+    "message": "ウルドゥー語"
+  },
+  "lang_uz": {
+    "message": "ウズベク語"
   }
 }

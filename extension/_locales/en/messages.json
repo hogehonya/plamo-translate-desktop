@@ -134,9 +134,6 @@
   "lang_it": {
     "message": "Italian"
   },
-  "lang_pt": {
-    "message": "Portuguese"
-  },
   "lang_ru": {
     "message": "Russian"
   },
@@ -255,5 +252,128 @@
   },
   "statusReleasedDetail": {
     "message": "The model loads again on the next translation."
+  },
+  "lang_ja_easy": {
+    "message": "Easy Japanese (experimental)"
+  },
+  "lang_ar": {
+    "message": "Arabic"
+  },
+  "lang_az": {
+    "message": "Azerbaijani"
+  },
+  "lang_be": {
+    "message": "Belarusian"
+  },
+  "lang_bg": {
+    "message": "Bulgarian"
+  },
+  "lang_bn": {
+    "message": "Bengali"
+  },
+  "lang_ca": {
+    "message": "Catalan"
+  },
+  "lang_ceb": {
+    "message": "Cebuano"
+  },
+  "lang_et": {
+    "message": "Estonian"
+  },
+  "lang_eu": {
+    "message": "Basque"
+  },
+  "lang_fa": {
+    "message": "Persian"
+  },
+  "lang_gu": {
+    "message": "Gujarati"
+  },
+  "lang_he": {
+    "message": "Hebrew"
+  },
+  "lang_hi": {
+    "message": "Hindi"
+  },
+  "lang_hr": {
+    "message": "Croatian"
+  },
+  "lang_hu": {
+    "message": "Hungarian"
+  },
+  "lang_hy": {
+    "message": "Armenian"
+  },
+  "lang_jv": {
+    "message": "Javanese"
+  },
+  "lang_ka": {
+    "message": "Georgian"
+  },
+  "lang_kk": {
+    "message": "Kazakh"
+  },
+  "lang_km": {
+    "message": "Khmer"
+  },
+  "lang_lt": {
+    "message": "Lithuanian"
+  },
+  "lang_lv": {
+    "message": "Latvian"
+  },
+  "lang_ml": {
+    "message": "Malayalam"
+  },
+  "lang_mr": {
+    "message": "Marathi"
+  },
+  "lang_ms": {
+    "message": "Malay"
+  },
+  "lang_my": {
+    "message": "Burmese"
+  },
+  "lang_ne": {
+    "message": "Nepali"
+  },
+  "lang_nl": {
+    "message": "Dutch"
+  },
+  "lang_pa": {
+    "message": "Punjabi"
+  },
+  "lang_pl": {
+    "message": "Polish"
+  },
+  "lang_si": {
+    "message": "Sinhala"
+  },
+  "lang_sk": {
+    "message": "Slovak"
+  },
+  "lang_sl": {
+    "message": "Slovenian"
+  },
+  "lang_sr": {
+    "message": "Serbian"
+  },
+  "lang_sw": {
+    "message": "Swahili"
+  },
+  "lang_ta": {
+    "message": "Tamil"
+  },
+  "lang_te": {
+    "message": "Telugu"
+  },
+  "lang_tl": {
+    "message": "Tagalog"
+  },
+  "lang_ur": {
+    "message": "Urdu"
+  },
+  "lang_uz": {
+    "message": "Uzbek"
   }
 }
