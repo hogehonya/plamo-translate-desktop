@@ -38,6 +38,9 @@ const DEBOUNCE: Duration = Duration::from_millis(500);
 const COPIED_FEEDBACK: Duration = Duration::from_millis(1500);
 /// Number of finished translations kept for instant reuse.
 const CACHE_SIZE: usize = 64;
+/// While text streams in, the output is redrawn at most this often. A GPU produces 100+
+/// tokens per second, and redrawing on every token starves input handling.
+const STREAM_FRAME: Duration = Duration::from_millis(50);
 
 #[cfg(target_os = "macos")]
 const COPY_TRANSLATION_KEY: &str = "cmd-shift-c";
@@ -154,8 +157,14 @@ impl TranslatorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Development aid: start with the contents of a file as the source text.
+        let initial_source = std::env::var_os("PLAMO_DEBUG_SOURCE")
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_default();
         let source = cx.new(|cx| {
-            TextareaState::new(window, cx).placeholder(t!("source.placeholder").into_owned())
+            TextareaState::new(window, cx)
+                .placeholder(t!("source.placeholder").into_owned())
+                .default_value(initial_source)
         });
         let output = cx.new(|cx| TextareaState::new(window, cx));
         let context_input = cx.new(|cx| {
@@ -258,14 +267,24 @@ impl TranslatorView {
             let _ = tx.send_blocking(event);
         });
         let events = cx.spawn_in(window, async move |this, cx| {
-            while let Ok(event) = rx.recv().await {
+            while let Ok(first) = rx.recv().await {
+                // Take everything that has arrived, so the UI handles a burst of tokens at once.
+                let mut batch = vec![first];
+                while let Ok(event) = rx.try_recv() {
+                    batch.push(event);
+                }
+                let streaming = batch.iter().any(|e| matches!(e, Event::Token { .. }));
                 if this
                     .update_in(cx, |this, window, cx| {
-                        this.on_worker_event(event, window, cx)
+                        this.on_worker_events(batch, window, cx)
                     })
                     .is_err()
                 {
                     break;
+                }
+                if streaming {
+                    // Let tokens accumulate; the next batch picks them up.
+                    cx.background_executor().timer(STREAM_FRAME).await;
                 }
             }
         });
@@ -775,6 +794,36 @@ impl TranslatorView {
             // The partial result must not satisfy a later identical request.
             self.shown = None;
             self.status = Status::Stopped;
+            cx.notify();
+        }
+    }
+
+    /// Handles a batch of worker events, appending consecutive tokens to the output in one go.
+    fn on_worker_events(
+        &mut self,
+        events: Vec<Event>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut pending = String::new();
+        for event in events {
+            match event {
+                Event::Token { job, text } => {
+                    if self.current_job == Some(job) {
+                        pending.push_str(&text);
+                    }
+                }
+                other => {
+                    // Later events (Finished in particular) must see the text before them.
+                    if !pending.is_empty() {
+                        self.append_translation(&std::mem::take(&mut pending), window, cx);
+                    }
+                    self.on_worker_event(other, window, cx);
+                }
+            }
+        }
+        if !pending.is_empty() {
+            self.append_translation(&pending, window, cx);
             cx.notify();
         }
     }
