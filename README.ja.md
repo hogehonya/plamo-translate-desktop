@@ -38,7 +38,8 @@ PLaMo は株式会社 Preferred Networks の商標です。
 
 ## ダウンロード
 
-Windows（x86_64）版と Linux（x86_64）版は GitHub Actions でビルドしています。**Actions** からワークフローの実行を開き、成果物（Artifacts）をダウンロードしてください。
+Windows（x86_64）版と Linux（x86_64）版は [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) からダウンロードできます。
+開発中の版を試すときは、**Actions** でブランチを選んで **Release** ワークフローを手動で実行し、その成果物（Artifacts）からパッケージをダウンロードしてください。
 
 - **Windows**: 展開して `plamo-translate-desktop.exe` を実行します。同梱の DLL は exe と同じフォルダに置いたままにしてください。llama.cpp 本体と、CPU・Vulkan のバックエンドはそこから読み込み、それ以外の場所からは読み込みません。
 - **Linux**: 展開して `plamo-translate-desktop` を実行します。同梱の共有ライブラリは、実行ファイル自身のフォルダ（`RUNPATH=$ORIGIN`）から読み込みます。
@@ -59,7 +60,7 @@ cargo run -p plamo-translate-desktop --release
 ```
 
 この開発用のビルドは CPU で動き、llama.cpp を静的にリンクします。
-配布用のパッケージは CI と同じ方法でビルドします。サイズを抑えた `dist` プロファイル（fat LTO、シンボル除去）を使い、Vulkan と実行時に読み込むバックエンドを有効にします。
+配布用のパッケージは Release ワークフローと同じ方法でビルドします。サイズを抑えた `dist` プロファイル（fat LTO、シンボル除去）を使い、Vulkan と実行時に読み込むバックエンドを有効にします。
 Vulkan のバックエンドには、さらに `libvulkan-dev glslc spirv-headers` が必要です。
 
 ```sh

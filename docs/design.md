@@ -299,11 +299,12 @@ the auto-translate flag, the window geometry, and the license acceptance record.
   For 2B Q4_K_M, generation runs at about 120–150 tok/s, against about 20 tok/s on the CPU.
   ggml also lists the integrated GPU, but only the discrete GPU's architecture is compiled; automatic selection skips integrated GPUs anyway.
 - Local Windows builds and test runs use `/mnt/e/` (a ReFS dev drive), which is faster than `C:`.
-- Windows binaries are built natively on GitHub Actions `windows-latest` (MSVC, Windows SDK, and CMake are preinstalled;
+- Windows binaries are built natively on GitHub Actions `windows-2025` (MSVC, Windows SDK, and CMake are preinstalled;
   the Vulkan SDK is installed by the workflow), not cross-compiled. Cross-compiling from Linux fails:
   - The `gpui-pre-windows` build script compiles its HLSL shaders with `fxc.exe` only when the build host is Windows.
   - Release builds then `include!` the generated shader bytes, so a Linux-hosted release build cannot compile.
-- CI runs on every push and pull request (Windows and Linux) and runs build, tests, clippy, and rustfmt.
+- CI runs on every push and pull request: rustfmt and clippy, and the tests, as two parallel Linux jobs with the latest stable Rust.
+  It builds no packages, so the slow parts (the Windows build, llama.cpp's Vulkan shaders, fat LTO) are not on every push.
 - Build configurations:
   - Windows: features `engine/vulkan` and `engine/dynamic-backends`. llama.cpp is built as DLLs
     (`llama.dll`, `ggml*.dll`), and the backend modules sit next to the exe.
@@ -325,13 +326,17 @@ the auto-translate flag, the window geometry, and the license acceptance record.
       WSL2 has no GPU Vulkan driver, so there the app uses the CPU, or the GPU through ROCm (`scripts/rocm.sh`).
   - Packages use the `dist` profile (fat LTO, one codegen unit, stripped).
     The Linux app binary is 34.5 MB this way, against 73.7 MB for a release build with llama.cpp linked statically.
-    Windows CI only builds this profile. Lints and tests run on Linux.
+    Lints and tests run on Linux only, so Windows code is compiled only by the Release workflow.
   - The `translate` CLI is built and used for a smoke test (`--list-devices` with the package's own libraries), but it is not shipped.
-- Every CI run uploads the packaged builds as workflow artifacts.
-- A tag push publishes release artifacts (M5):
-  - Windows: a portable zip with the exe, the DLLs and backend modules, and the licenses.
-  - Linux: a tar.gz (an AppImage comes later).
-- Windows-specific behaviour (DirectX rendering, IME, Vulkan performance on real hardware) is checked by running CI artifacts on the Windows host.
+- The Release workflow builds the packages, with the latest stable Rust:
+  - Pushing a tag `vX.Y.Z` publishes a GitHub release with generated notes. The tag must match the workspace version.
+  - A manual run (**Run workflow**, from any branch) builds the same packages as workflow artifacts without publishing,
+    versioned `X.Y.Z-dev.<commit>`.
+  - Windows: a portable zip with the exe, the DLLs and backend modules, the READMEs, and the licenses.
+  - Linux: a tar.gz with the same contents and the icon (an AppImage comes later).
+  - Build caches are keyed on the rustc version. A tag can restore only its own caches and those of the default branch,
+    so a manual run on `main` before tagging makes the release build warm.
+- Windows-specific behaviour (DirectX rendering, IME, Vulkan performance on real hardware) is checked by running Release artifacts on the Windows host.
   Once the app is feature-complete, the repo is also built and run locally on Windows.
 - Icon: a white block "p" on a blue rounded tile, after the PLaMo logo. `scripts/gen_icons.py` produces `assets/icon/`
   (SVG, PNGs from 16 to 512 px, and a multi-size `.ico`) using only the Python standard library.
@@ -354,7 +359,7 @@ the auto-translate flag, the window geometry, and the license acceptance record.
 - **M3 — backend selection**: device list, GPU layers, `n_ctx`, threads, and the memory estimate.
 - **M4 — translation options**: style, context, glossary, and long text with history.
 - **M5 — distribution**:
-  - Release workflow.
+  - Release workflow (done).
   - Icon (done).
   - Third-party license notices for Lucide icons (ISC/MIT), llama.cpp (MIT), GPUI (Apache-2.0), and the other Rust crates.
   - Linux desktop entry.
@@ -370,4 +375,4 @@ the auto-translate flag, the window geometry, and the license acceptance record.
 | `dynamic-backends` with Vulkan does not build on Windows MSVC | Fall back to a statically linked Vulkan build, or ship two exe variants |
 | IME or text input gaps in gpui-kit's textarea | Check in M0; patch or contribute upstream if needed |
 | gpui-pre snapshots break the API often | Pin exact versions and update deliberately |
-| Long llama.cpp + Vulkan shader builds in CI | Cache the target dir with `Swatinem/rust-cache` |
+| Long llama.cpp + Vulkan shader builds in CI | Build packages only in the Release workflow; cache the target dir (`Swatinem/rust-cache` on Linux, `actions/cache` on Windows) |

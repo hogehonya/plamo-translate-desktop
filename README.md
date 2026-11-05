@@ -39,7 +39,8 @@ PLaMo is a trademark of Preferred Networks, Inc.
 
 ## Download
 
-Windows (x86_64) and Linux (x86_64) builds are produced by GitHub Actions. Open a workflow run under **Actions** and download its artifacts.
+Windows (x86_64) and Linux (x86_64) packages are on the [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page.
+To try a development version, run the **Release** workflow under **Actions** on a branch and download the packages from its artifacts.
 
 - **Windows**: unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it: llama.cpp and its CPU and Vulkan backends are loaded from there, and only from there.
 - **Linux**: extract and run `plamo-translate-desktop`. The shared libraries next to it are found through the executable's own directory (`RUNPATH=$ORIGIN`).
@@ -59,7 +60,7 @@ cargo run -p plamo-translate-desktop --release
 ```
 
 This development build runs on the CPU, with llama.cpp linked statically.
-Packages are built like CI does: with the size-optimized `dist` profile (fat LTO, stripped), Vulkan, and dynamically loaded backends.
+Packages are built like the Release workflow does: with the size-optimized `dist` profile (fat LTO, stripped), Vulkan, and dynamically loaded backends.
 The Vulkan backend also needs `libvulkan-dev glslc spirv-headers`.
 
 ```sh
