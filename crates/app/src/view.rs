@@ -94,6 +94,7 @@ enum Status {
         tokens_per_second: f64,
     },
     Cached,
+    Stopped,
     Truncated,
     Error(String),
 }
@@ -310,11 +311,100 @@ impl TranslatorView {
             _subscriptions: subscriptions,
             _events: events,
         };
-        match initial {
-            Some(choice) => this.load_model(choice, cx),
-            None => cx.defer_in(window, |this, window, cx| this.open_models(window, cx)),
+        let needs_model = initial.is_none();
+        if let Some(choice) = initial {
+            this.load_model(choice, cx);
+        }
+        if !this.settings.license_accepted {
+            cx.defer_in(window, move |this, window, cx| {
+                this.open_license(needs_model, window, cx)
+            });
+        } else if needs_model {
+            cx.defer_in(window, |this, window, cx| this.open_models(window, cx));
         }
         this
+    }
+
+    /// Shows the PLaMo Community License. Accepting it enables downloads, and on the first run
+    /// (`then_open_models`) continues to the Models dialog when no model is available yet.
+    fn open_license(
+        &mut self,
+        then_open_models: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = cx.entity().downgrade();
+        let url = crate::models::license_url();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let accept_view = view.clone();
+            dialog
+                .title(t!("license.title").into_owned())
+                .w(px(560.))
+                .overlay_closable(false)
+                .close_button(false)
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .text_sm()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Built with PLaMo"),
+                        )
+                        .child(t!("license.body").into_owned())
+                        .child(
+                            v_flex()
+                                .gap_1()
+                                .pl_2()
+                                .child(t!("license.point_personal").into_owned())
+                                .child(t!("license.point_commercial").into_owned())
+                                .child(t!("license.point_output").into_owned()),
+                        )
+                        .child(
+                            Button::new("read-license")
+                                .link()
+                                .label(t!("models.license_link").into_owned())
+                                .on_click(move |_, _, cx| cx.open_url(url)),
+                        ),
+                )
+                .footer(
+                    h_flex()
+                        .w_full()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("license-later")
+                                .label(t!("license.later").into_owned())
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("license-accept")
+                                .primary()
+                                .label(t!("license.accept").into_owned())
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = accept_view.update(cx, |this, cx| {
+                                        this.accept_license(then_open_models, window, cx)
+                                    });
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn accept_license(
+        &mut self,
+        then_open_models: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.license_accepted = true;
+        self.settings.save();
+        self.models
+            .update(cx, |models, cx| models.set_license_accepted(true, cx));
+        if then_open_models && self.active_model.is_none() {
+            self.open_models(window, cx);
+        }
     }
 
     /// Makes `choice` the active model and loads it.
@@ -441,10 +531,7 @@ impl TranslatorView {
                 self.pending_delete = Some(entry);
                 self.unload_model(cx);
             }
-            ModelsEvent::LicenseAccepted => {
-                self.settings.license_accepted = true;
-                self.settings.save();
-            }
+            ModelsEvent::ReviewLicense => self.open_license(false, window, cx),
         }
     }
 
@@ -569,15 +656,35 @@ impl TranslatorView {
         cx.notify();
     }
 
+    /// Replaces the output and scrolls it back to the top.
     fn set_translation(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.translation = text;
-        self.refresh_output(window, cx);
-    }
-
-    fn refresh_output(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = SharedString::from(self.translation.clone());
         self.output
             .update(cx, |state, cx| state.set_value(text, window, cx));
+    }
+
+    /// Shows newly streamed text, keeping the reader's scroll position.
+    fn append_translation(&mut self, piece: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.translation.push_str(piece);
+        let text = SharedString::from(self.translation.clone());
+        self.output.update(cx, |state, cx| {
+            // `set_value` scrolls to the start; restore where the reader was.
+            let offset = state.scroll_offset();
+            state.set_value(text, window, cx);
+            state.set_scroll_offset(offset, cx);
+        });
+    }
+
+    /// Stops the running translation, keeping what has been translated so far.
+    fn stop_translation(&mut self, cx: &mut Context<Self>) {
+        if self.current_job.take().is_some() {
+            self.worker.cancel();
+            // The partial result must not satisfy a later identical request.
+            self.shown = None;
+            self.status = Status::Stopped;
+            cx.notify();
+        }
     }
 
     fn on_worker_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
@@ -616,8 +723,7 @@ impl TranslatorView {
                 }
             }
             Event::Token { job, text } if is_current(job) => {
-                self.translation.push_str(&text);
-                self.refresh_output(window, cx);
+                self.append_translation(&text, window, cx);
             }
             Event::Finished { job, stats } if is_current(job) => {
                 self.current_job = None;
@@ -735,6 +841,7 @@ impl TranslatorView {
                 t!("status.done", speed = format!("{tokens_per_second:.1}")).into_owned()
             }
             Status::Cached => t!("status.cached").into_owned(),
+            Status::Stopped => t!("status.stopped").into_owned(),
             Status::Truncated => t!("status.truncated").into_owned(),
             Status::Error(message) => t!("status.error", message = message).into_owned(),
         }
@@ -832,13 +939,18 @@ impl Render for TranslatorView {
                         cx.notify();
                     })),
             )
-            .child(
+            .child(if self.current_job.is_some() {
+                Button::new("stop")
+                    .danger()
+                    .label(t!("action.stop").into_owned())
+                    .on_click(cx.listener(|this, _, _, cx| this.stop_translation(cx)))
+            } else {
                 Button::new("translate")
                     .primary()
                     .label(t!("action.translate").into_owned())
                     .disabled(!self.model_ready)
-                    .on_click(cx.listener(|this, _, window, cx| this.translate_now(window, cx))),
-            );
+                    .on_click(cx.listener(|this, _, window, cx| this.translate_now(window, cx)))
+            });
 
         let source_pane = v_flex()
             .flex_1()

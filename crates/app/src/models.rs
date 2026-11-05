@@ -6,7 +6,6 @@ use std::time::Duration;
 use engine::download::{DownloadEvent, Downloads, Progress};
 use engine::models::{CATALOG, CatalogEntry, LocalState, ModelStore};
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
@@ -16,8 +15,17 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-pub const LICENSE_URL_EN: &str = "https://plamo.preferredai.jp/info/plamo-community-license-en";
-pub const LICENSE_URL_JA: &str = "https://plamo.preferredai.jp/info/plamo-community-license-ja";
+const LICENSE_URL_EN: &str = "https://plamo.preferredai.jp/info/plamo-community-license-en";
+const LICENSE_URL_JA: &str = "https://plamo.preferredai.jp/info/plamo-community-license-ja";
+
+/// The PLaMo Community License in the UI language.
+pub fn license_url() -> &'static str {
+    if rust_i18n::locale().starts_with("ja") {
+        LICENSE_URL_JA
+    } else {
+        LICENSE_URL_EN
+    }
+}
 
 pub enum ModelsEvent {
     /// The user picked a downloaded model, or the download they started first finished.
@@ -26,7 +34,8 @@ pub enum ModelsEvent {
     Unload,
     /// Delete the active model. The owner unloads it first, then calls [`ModelsPanel::delete`].
     DeleteActive(&'static CatalogEntry),
-    LicenseAccepted,
+    /// Show the license agreement (downloads stay disabled until it is accepted).
+    ReviewLicense,
 }
 
 pub struct ModelsPanel {
@@ -80,6 +89,11 @@ impl ModelsPanel {
         self.downloads.store()
     }
 
+    pub fn set_license_accepted(&mut self, accepted: bool, cx: &mut Context<Self>) {
+        self.license_accepted = accepted;
+        cx.notify();
+    }
+
     pub fn set_recommended(&mut self, entry: &'static CatalogEntry, cx: &mut Context<Self>) {
         self.recommended = entry;
         cx.notify();
@@ -128,6 +142,7 @@ impl ModelsPanel {
                 downloaded,
                 total: entry.bytes,
                 bytes_per_second: 0.0,
+                average_bytes_per_second: 0.0,
             },
         );
         if self.active.is_none() && self.use_when_done.is_none() {
@@ -241,76 +256,84 @@ impl ModelsPanel {
         };
 
         let button = |name: &str| Button::new(SharedString::from(format!("{name}-{id}"))).xsmall();
-        let actions = h_flex().gap_1().justify_end().map(|this| {
-            if progress.is_some() {
-                this.child(
-                    button("cancel")
-                        .label(t!("models.cancel").into_owned())
-                        .on_click(cx.listener(move |this, _, _, cx| this.cancel(entry, cx))),
-                )
-            } else {
-                match state {
-                    LocalState::Downloaded => this
-                        .map(|this| {
-                            if is_active {
-                                this.child(
-                                    button("unload")
-                                        .label(t!("models.unload").into_owned())
-                                        .on_click(
-                                            cx.listener(|_, _, _, cx| cx.emit(ModelsEvent::Unload)),
-                                        ),
+        // A fixed-width column keeps Delete in the same place whichever action precedes it.
+        let actions = h_flex()
+            .w(px(190.))
+            .flex_shrink_0()
+            .gap_1()
+            .justify_end()
+            .map(|this| {
+                if progress.is_some() {
+                    this.child(
+                        button("cancel")
+                            .label(t!("models.cancel").into_owned())
+                            .on_click(cx.listener(move |this, _, _, cx| this.cancel(entry, cx))),
+                    )
+                } else {
+                    match state {
+                        LocalState::Downloaded => this
+                            .map(|this| {
+                                if is_active {
+                                    this.child(
+                                        button("unload")
+                                            .label(t!("models.unload").into_owned())
+                                            .on_click(cx.listener(|_, _, _, cx| {
+                                                cx.emit(ModelsEvent::Unload)
+                                            })),
+                                    )
+                                } else {
+                                    this.child(
+                                        button("use")
+                                            .primary()
+                                            .label(t!("models.use").into_owned())
+                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                cx.emit(ModelsEvent::Use(entry))
+                                            })),
+                                    )
+                                }
+                            })
+                            .child(
+                                button("delete")
+                                    .ghost()
+                                    .label(t!("models.delete").into_owned())
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.confirm_delete(entry, window, cx)
+                                    })),
+                            ),
+                        LocalState::Partial(_) => this
+                            .child(
+                                button("resume")
+                                    .primary()
+                                    .label(t!("models.resume").into_owned())
+                                    .disabled(!can_download)
+                                    .on_click(
+                                        cx.listener(move |this, _, _, cx| this.start(entry, cx)),
+                                    ),
+                            )
+                            .child(
+                                button("delete")
+                                    .ghost()
+                                    .label(t!("models.delete").into_owned())
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.confirm_delete(entry, window, cx)
+                                    })),
+                            ),
+                        LocalState::Missing => this.child(
+                            button("download")
+                                .label(
+                                    if error.is_some() {
+                                        t!("models.retry")
+                                    } else {
+                                        t!("models.download")
+                                    }
+                                    .into_owned(),
                                 )
-                            } else {
-                                this.child(
-                                    button("use")
-                                        .primary()
-                                        .label(t!("models.use").into_owned())
-                                        .on_click(cx.listener(move |_, _, _, cx| {
-                                            cx.emit(ModelsEvent::Use(entry))
-                                        })),
-                                )
-                            }
-                        })
-                        .child(
-                            button("delete")
-                                .ghost()
-                                .label(t!("models.delete").into_owned())
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.confirm_delete(entry, window, cx)
-                                })),
-                        ),
-                    LocalState::Partial(_) => this
-                        .child(
-                            button("resume")
-                                .primary()
-                                .label(t!("models.resume").into_owned())
                                 .disabled(!can_download)
                                 .on_click(cx.listener(move |this, _, _, cx| this.start(entry, cx))),
-                        )
-                        .child(
-                            button("delete")
-                                .ghost()
-                                .label(t!("models.delete").into_owned())
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.confirm_delete(entry, window, cx)
-                                })),
                         ),
-                    LocalState::Missing => this.child(
-                        button("download")
-                            .label(
-                                if error.is_some() {
-                                    t!("models.retry")
-                                } else {
-                                    t!("models.download")
-                                }
-                                .into_owned(),
-                            )
-                            .disabled(!can_download)
-                            .on_click(cx.listener(move |this, _, _, cx| this.start(entry, cx))),
-                    ),
+                    }
                 }
-            }
-        });
+            });
 
         h_flex()
             .id(SharedString::from(format!("row-{id}")))
@@ -353,56 +376,56 @@ impl Render for ModelsPanel {
         let rows: Vec<_> = CATALOG.iter().map(|e| self.render_row(e, cx)).collect();
         let (border, muted) = {
             let theme = cx.theme();
-            (theme.border, theme.muted_foreground)
+            (theme.warning, theme.muted_foreground)
         };
-        let license_url = if rust_i18n::locale().starts_with("ja") {
-            LICENSE_URL_JA
-        } else {
-            LICENSE_URL_EN
-        };
+        let license_url = license_url();
         let models_dir = self.store().dir().to_path_buf();
 
         v_flex()
             .gap_3()
             .text_sm()
-            .child(
-                v_flex()
-                    .gap_2()
-                    .p_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(border)
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Built with PLaMo"),
-                    )
-                    .child(t!("models.license_notice").into_owned())
-                    .child(
+            .map(|this| {
+                if self.license_accepted {
+                    this.child(
                         h_flex()
-                            .gap_3()
-                            .child(
-                                Checkbox::new("accept-license")
-                                    .checked(self.license_accepted)
-                                    .disabled(self.license_accepted)
-                                    .label(t!("models.license_agree").into_owned())
-                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                        if *checked && !this.license_accepted {
-                                            this.license_accepted = true;
-                                            cx.emit(ModelsEvent::LicenseAccepted);
-                                            cx.notify();
-                                        }
-                                    })),
-                            )
+                            .gap_2()
+                            .text_xs()
+                            .text_color(muted)
+                            .child("Built with PLaMo")
+                            .child("·")
                             .child(
                                 Button::new("license-link")
                                     .link()
                                     .xsmall()
-                                    .label(t!("models.license_link").into_owned())
+                                    .label(t!("models.license_name").into_owned())
                                     .on_click(move |_, _, cx| cx.open_url(license_url)),
                             ),
-                    ),
-            )
+                    )
+                } else {
+                    this.child(
+                        h_flex()
+                            .gap_3()
+                            .p_2()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(border)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(t!("models.license_required").into_owned()),
+                            )
+                            .child(
+                                Button::new("review-license")
+                                    .primary()
+                                    .xsmall()
+                                    .label(t!("models.review_license").into_owned())
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(ModelsEvent::ReviewLicense)
+                                    })),
+                            ),
+                    )
+                }
+            })
             .child(
                 div()
                     .id("model-list")

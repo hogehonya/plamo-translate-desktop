@@ -46,6 +46,8 @@ jobs:
           dist=dist/plamo-translate-desktop
           mkdir -p "$dist"
           cp target/release/plamo-translate-desktop target/release/examples/translate "$dist/"
+          cp README.md LICENSE-MIT LICENSE-APACHE assets/icon/icon-256.png "$dist/"
+          "$dist/translate" --list-devices
           tar -C dist -czf plamo-translate-desktop-linux-x86_64.tar.gz plamo-translate-desktop
 
       - uses: actions/upload-artifact@v7
@@ -110,14 +112,28 @@ jobs:
           $dist = 'dist\plamo-translate-desktop'
           New-Item -ItemType Directory -Force $dist | Out-Null
           Copy-Item "$release\plamo-translate-desktop.exe", "$release\examples\translate.exe" $dist
-          # llama.cpp shared libraries (llama.dll, ggml.dll, ggml-base.dll, ...).
-          Copy-Item "$release\*.dll" $dist
-          # ggml backend modules (CPU variants, Vulkan) from the newest llama-cpp-sys-2 build.
-          $out = Get-ChildItem "$release\build\llama-cpp-sys-2-*\out\backends" -Directory |
+          # Output of the newest llama-cpp-sys-2 build: llama.cpp DLLs in bin\, ggml backend
+          # modules (CPU variants, Vulkan) in backends\.
+          $out = Get-ChildItem "$release\build\llama-cpp-sys-2-*\out" -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName 'backends') } |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $out) { throw 'ggml backend modules not found' }
-          Copy-Item "$($out.FullName)\*.dll" $dist
+          if (-not $out) { throw 'llama-cpp-sys-2 build output not found' }
+          # The executables import these three; pick the copy with the shortest path (the
+          # install tree rather than the CMake build tree).
+          foreach ($dll in 'llama.dll', 'ggml.dll', 'ggml-base.dll') {
+            $found = Get-ChildItem $out.FullName -Recurse -Filter $dll |
+              Sort-Object { $_.FullName.Length } | Select-Object -First 1
+            if ($found) { Copy-Item $found.FullName $dist }
+          }
+          Copy-Item "$($out.FullName)\backends\*.dll" $dist
+          foreach ($dll in 'llama.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll') {
+            if (-not (Test-Path (Join-Path $dist $dll))) { throw "$dll is missing from the package" }
+          }
+          Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE $dist
           Get-ChildItem $dist | Format-Table Name, Length
+          # Smoke test: the packaged CLI must load llama.cpp and list at least the CPU.
+          & "$dist\translate.exe" --list-devices
+          if ($LASTEXITCODE -ne 0) { throw "translate.exe failed with exit code $LASTEXITCODE" }
           Compress-Archive -Path $dist -DestinationPath plamo-translate-desktop-windows-x86_64.zip
 
       - uses: actions/upload-artifact@v7

@@ -25,8 +25,11 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 pub struct Progress {
     pub downloaded: u64,
     pub total: u64,
-    /// Smoothed transfer rate. Zero until the first measurement.
+    /// Recent transfer rate (exponentially smoothed), for display. Zero until measured.
     pub bytes_per_second: f64,
+    /// Average rate since this transfer started. Steadier than the recent rate, so the
+    /// ETA uses it once a few seconds have passed. Zero until then.
+    pub average_bytes_per_second: f64,
 }
 
 impl Progress {
@@ -40,10 +43,13 @@ impl Progress {
 
     /// Estimated time remaining, once a rate is known.
     pub fn eta(&self) -> Option<Duration> {
-        (self.bytes_per_second > 0.0).then(|| {
-            Duration::from_secs_f64(
-                self.total.saturating_sub(self.downloaded) as f64 / self.bytes_per_second,
-            )
+        let rate = if self.average_bytes_per_second > 0.0 {
+            self.average_bytes_per_second
+        } else {
+            self.bytes_per_second
+        };
+        (rate > 0.0).then(|| {
+            Duration::from_secs_f64(self.total.saturating_sub(self.downloaded) as f64 / rate)
         })
     }
 }
@@ -138,6 +144,7 @@ pub fn download(
             downloaded,
             total,
             bytes_per_second: 0.0,
+            average_bytes_per_second: 0.0,
         });
         loop {
             if is_cancelled() {
@@ -153,11 +160,12 @@ pub fn download(
             part.write_all(&buf[..n])?;
             hasher.update(&buf[..n]);
             downloaded += n as u64;
-            if let Some(rate) = meter.sample(downloaded) {
+            if let Some((rate, average)) = meter.sample(downloaded) {
                 on_progress(Progress {
                     downloaded,
                     total,
                     bytes_per_second: rate,
+                    average_bytes_per_second: average,
                 });
             }
         }
@@ -168,6 +176,7 @@ pub fn download(
             downloaded,
             total,
             bytes_per_second: meter.rate,
+            average_bytes_per_second: meter.average(downloaded),
         });
     }
 
@@ -211,24 +220,42 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Throttles progress reports and smooths the transfer rate.
+/// Throttles progress reports and measures the transfer rate.
 struct RateMeter {
+    start_time: Instant,
+    start_bytes: u64,
     last_time: Instant,
     last_bytes: u64,
     rate: f64,
 }
 
+/// The average rate is reported only after this long, when it has settled.
+const AVERAGE_WARMUP: Duration = Duration::from_secs(3);
+
 impl RateMeter {
     fn new(bytes: u64) -> Self {
+        let now = Instant::now();
         Self {
-            last_time: Instant::now(),
+            start_time: now,
+            start_bytes: bytes,
+            last_time: now,
             last_bytes: bytes,
             rate: 0.0,
         }
     }
 
-    /// Returns the updated rate when a report is due.
-    fn sample(&mut self, bytes: u64) -> Option<f64> {
+    /// Average rate since the start, or zero during the warm-up.
+    fn average(&self, bytes: u64) -> f64 {
+        let elapsed = self.start_time.elapsed();
+        if elapsed < AVERAGE_WARMUP {
+            0.0
+        } else {
+            (bytes - self.start_bytes) as f64 / elapsed.as_secs_f64()
+        }
+    }
+
+    /// Returns the recent and average rates when a report is due.
+    fn sample(&mut self, bytes: u64) -> Option<(f64, f64)> {
         let elapsed = self.last_time.elapsed();
         if elapsed < PROGRESS_INTERVAL {
             return None;
@@ -241,7 +268,7 @@ impl RateMeter {
         };
         self.last_time = Instant::now();
         self.last_bytes = bytes;
-        Some(self.rate)
+        Some((self.rate, self.average(bytes)))
     }
 }
 
@@ -342,11 +369,20 @@ mod tests {
             downloaded: 25,
             total: 100,
             bytes_per_second: 5.0,
+            average_bytes_per_second: 0.0,
         };
         assert!((p.fraction() - 0.25).abs() < 1e-6);
+        // Before the average settles, the recent rate gives the ETA.
         assert_eq!(p.eta(), Some(Duration::from_secs(15)));
+        // Afterwards the average wins.
+        let p = Progress {
+            average_bytes_per_second: 3.0,
+            ..p
+        };
+        assert_eq!(p.eta(), Some(Duration::from_secs(25)));
         let p = Progress {
             bytes_per_second: 0.0,
+            average_bytes_per_second: 0.0,
             ..p
         };
         assert_eq!(p.eta(), None);

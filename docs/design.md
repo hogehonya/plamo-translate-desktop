@@ -175,7 +175,9 @@ The first implementation is `LlamaCppBackend`:
   - Hugging Face redirects to a CDN that honours `Range`, so an interrupted or cancelled download resumes from the partial file.
   - The existing part is hashed first, so the digest always covers the whole file.
   - The file is renamed into place only after the SHA-256 matches, so a final file of the right size counts as downloaded.
-  - Progress reports bytes, a smoothed rate, and ETA, throttled to 10 Hz.
+  - Progress reports bytes and two rates, throttled to 10 Hz.
+    The recent rate (exponentially smoothed) is what the UI shows.
+    The average since the transfer started is used for the ETA once 3 s have passed, so the estimate does not jump around.
 - Storage:
   - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data\models`
   - Linux: `$XDG_DATA_HOME/plamo-translate-desktop/models` (usually `~/.local/share/...`)
@@ -189,6 +191,9 @@ The first implementation is `LlamaCppBackend`:
   - Deleting asks for confirmation.
   - Deleting the active model unloads it first. The file is removed after the worker reports `Unloaded`, because Windows cannot delete a memory-mapped file.
   - Downloads stay disabled until the user accepts the PLaMo Community License. The acceptance is saved in settings.
+    The license is shown as a modal at first start, with "I agree" and "Later".
+    Until it is accepted, the Models dialog shows a one-line notice with "Review license".
+    Afterwards it shows only "Built with PLaMo · PLaMo Community License".
 - Startup picks the first available of: the saved selection if downloaded, 2B Q4_K_M if downloaded, any downloaded model.
   With no model, the Models dialog opens and the first finished download becomes active automatically.
 - The model marked "Recommended" is 2B Q4_K_M until M3 provides device memory.
@@ -249,6 +254,9 @@ The first implementation is `LlamaCppBackend`:
   - The glossary is a table that can be imported and exported as TSV.
 - The Models & Backend dialog lists the catalog with status and Download, Cancel, Use, and Delete actions,
   a progress bar showing rate and ETA, and the backend and device settings.
+- While a translation runs, the Translate button becomes Stop. Stopping keeps the partial output, and that partial output is never cached.
+- Streaming keeps the output pane's scroll position, so a reader can scroll through a long translation while it grows.
+  A new translation starts at the top.
 - Japanese IME input must work on both platforms. This is checked in M0.
 - Theme follows the OS. Light and dark come from gpui-kit.
 - UI strings live in `locales/en.yml` and `locales/ja.yml`. The OS locale selects the language, and settings can override it.

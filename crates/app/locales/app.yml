@@ -35,6 +35,9 @@ action.translate:
 action.swap:
   en: Swap languages
   ja: 言語を入れ替え
+action.stop:
+  en: Stop
+  ja: 中止
 action.copy:
   en: Copy
   ja: コピー
@@ -82,9 +85,9 @@ status.done:
 status.cached:
   en: Done (cached)
   ja: 完了（キャッシュ）
-status.cancelled:
-  en: Cancelled
-  ja: キャンセルしました
+status.stopped:
+  en: Translation stopped
+  ja: 翻訳を中止しました
 status.truncated:
   en: The text is too long; the translation was cut off
   ja: テキストが長すぎるため、翻訳が途中で切れました
@@ -130,15 +133,18 @@ backend.memory_warning:
 models.none:
   en: No model
   ja: モデル未選択
-models.license_notice:
-  en: "PLaMo 3 Translate models are provided by Preferred Networks under the PLaMo Community License. Personal and non-commercial use is free. Commercial use requires registration (or a separate agreement above ¥1B annual revenue)."
-  ja: "PLaMo 3 Translate のモデルは、Preferred Networks により PLaMo コミュニティライセンスで提供されています。個人・非商用での利用は無料です。商用利用には事前登録が必要です（年間売上 10 億円超の場合は別途契約）。"
-models.license_agree:
-  en: I agree to the PLaMo Community License
-  ja: PLaMo コミュニティライセンスに同意する
+models.license_name:
+  en: PLaMo Community License
+  ja: PLaMo コミュニティライセンス
+models.license_required:
+  en: Downloading models requires accepting the PLaMo Community License.
+  ja: モデルのダウンロードには PLaMo コミュニティライセンスへの同意が必要です。
+models.review_license:
+  en: Review license
+  ja: ライセンスを確認
 models.license_link:
-  en: Read the license
-  ja: ライセンスを読む
+  en: Read the full license
+  ja: ライセンス全文を読む
 models.recommended:
   en: Recommended
   ja: おすすめ
@@ -350,3 +356,25 @@ lang.uz:
 lang.vi:
   en: Vietnamese
   ja: ベトナム語
+
+license.title:
+  en: PLaMo Community License
+  ja: PLaMo コミュニティライセンス
+license.body:
+  en: "The translation models are provided by Preferred Networks, Inc. under the PLaMo Community License. Please read it and agree before downloading a model."
+  ja: "翻訳モデルは、Preferred Networks, Inc. により PLaMo コミュニティライセンスで提供されています。モデルをダウンロードする前に、内容を確認して同意してください。"
+license.point_personal:
+  en: "• Personal and non-commercial use is free."
+  ja: "• 個人・非商用での利用は無料です。"
+license.point_commercial:
+  en: "• Commercial use (including use within an organization) requires prior registration, or a separate agreement if annual revenue exceeds ¥1 billion."
+  ja: "• 商用利用（組織内での利用を含む）には事前登録が必要です。年間売上が 10 億円を超える場合は別途契約が必要です。"
+license.point_output:
+  en: "• When publishing translations, indicate that they were produced by PLaMo."
+  ja: "• 翻訳結果を公開する際は、PLaMo による出力であることを明示してください。"
+license.accept:
+  en: I agree
+  ja: 同意する
+license.later:
+  en: Later
+  ja: 後で
