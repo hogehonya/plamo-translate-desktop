@@ -16,11 +16,13 @@ vulkan = ["llama-cpp-2/vulkan"]
 cuda = ["llama-cpp-2/cuda"]
 rocm = ["llama-cpp-2/rocm"]
 # Build ggml backends as loadable modules placed next to the executable.
-dynamic-backends = ["llama-cpp-2/dynamic-backends"]
+dynamic-backends = ["llama-cpp-2/dynamic-backends", "dep:llama-cpp-sys-2"]
 
 [dependencies]
 pfml.workspace = true
 llama-cpp-2.workspace = true
+# Only for the build output directory of the backend modules (see `Runtime::init`).
+llama-cpp-sys-2 = { workspace = true, optional = true }
 thiserror.workspace = true
 ureq = "3"
 sha2 = "0.11"

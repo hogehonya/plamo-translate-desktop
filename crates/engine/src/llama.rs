@@ -30,8 +30,9 @@ pub struct RuntimeOptions {
     /// Directory holding ggml backend modules (`dynamic-backends` builds only).
     ///
     /// Defaults to the directory of the current executable, which is where a packaged app keeps
-    /// them. If no backend loads from there, the build output directory is tried, so
-    /// `cargo run` works without packaging.
+    /// them. Only when nothing loads from there *and* the executable runs from its own cargo
+    /// target directory (`cargo run`) is the build output directory tried as well; a packaged
+    /// app never looks outside its own folder.
     pub backends_dir: Option<PathBuf>,
 }
 
@@ -53,8 +54,16 @@ impl Runtime {
             if let Some(dir) = dir {
                 llama_cpp_2::llama_backend::load_backends_from_path(&dir);
             }
+            if llama_cpp_2::list_llama_ggml_backend_devices().is_empty()
+                && let Some(dir) = dev_backends_dir()
+            {
+                llama_cpp_2::llama_backend::load_backends_from_path(dir);
+            }
+            // With no backend registered, `llama_backend_init` would search ggml's default paths,
+            // which include the build machine's directory and the current directory. Refuse
+            // instead, so modules are only ever loaded from the application's own folder.
             if llama_cpp_2::list_llama_ggml_backend_devices().is_empty() {
-                llama_cpp_2::llama_backend::load_backends();
+                return Err(EngineError::NoBackends);
             }
         }
         #[cfg(not(feature = "dynamic-backends"))]
@@ -103,6 +112,21 @@ impl Runtime {
         let specials = SpecialTokens::resolve(&model)?;
         Ok(Model { model, specials })
     }
+}
+
+/// The build output directory of the backend modules, if this executable was built into the
+/// same cargo target directory (that is, it runs via `cargo run` or from `target/<profile>`).
+///
+/// The path is baked in at build time. On another machine it is just a path that someone else
+/// might create, so it must not be searched there.
+#[cfg(feature = "dynamic-backends")]
+fn dev_backends_dir() -> Option<&'static Path> {
+    let dir = Path::new(llama_cpp_sys_2::BACKENDS_DIR?);
+    // <target>/<profile>/build/llama-cpp-sys-2-<hash>/out/backends
+    let profile_dir = dir.ancestors().nth(4)?;
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let profile_dir = profile_dir.canonicalize().ok()?;
+    exe.starts_with(&profile_dir).then_some(dir)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

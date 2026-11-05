@@ -22,3 +22,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # which lacks the `plamo3` tokenizer used by the PLaMo 3 Translate GGUF files.
 # Switch back to a crates.io release once one ships llama.cpp >= 0.8.0.
 llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "0364f5da1c6a6ee37f507031f116ce4a09b28594", default-features = false }
+llama-cpp-sys-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "0364f5da1c6a6ee37f507031f116ce4a09b28594", default-features = false }
+
+# Size-optimized release for distribution: `cargo build --profile dist`.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = true

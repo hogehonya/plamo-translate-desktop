@@ -33,6 +33,8 @@ pub enum EngineError {
     Batch(#[from] llama_cpp_2::llama_batch::BatchAddError),
     #[error("not a PLaMo 3 Translate model: special token {0} is missing")]
     MissingSpecialToken(&'static str),
+    #[error("no compute backend found: the ggml backend modules must be next to the executable")]
+    NoBackends,
     #[error("prompt is too long: {prompt_tokens} tokens for a context of {n_ctx}")]
     PromptTooLong { prompt_tokens: usize, n_ctx: usize },
 }

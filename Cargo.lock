@@ -1402,6 +1402,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "llama-cpp-2",
+ "llama-cpp-sys-2",
  "pfml",
  "serde",
  "serde_json",
