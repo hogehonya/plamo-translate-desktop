@@ -10,10 +10,10 @@ locally on your computer. It works offline once a model is downloaded. Written i
 ## Features
 
 - Translation between 53 languages. The default target is "Japanese ⇄ English (auto)".
-- Paste to translate; text you type is translated after a short pause. The translation streams in as it is generated, with the live speed in the status bar, and can be stopped at any time.
+- Paste to translate; text you type is translated after a short pause (the Auto switch in the toolbar turns this off). The translation streams in as it is generated, with the progress, speed, and remaining time in the status bar, and can be stopped at any time.
 - Japanese output style (polite or plain), a reference context, and a glossary (`source = target`, one term per line).
 - Long texts are split into paragraphs and translated in order, with earlier pairs passed as history to keep wording consistent.
-  Output that falls into a repetition loop is detected, withdrawn, and translated again sentence by sentence.
+  Output that falls into a repetition loop is detected, withdrawn, and translated again in smaller pieces. A passage that keeps looping is cut and marked in the translation.
 - Built-in model manager: choose a model size and quantization (0.8B, 2B, 8B or 31B GGUF).
   - Each file shows the translation quality PFN publishes, with the difference from the unquantized model.
   - Downloads resume after an interruption and are verified with SHA-256.
@@ -42,12 +42,24 @@ PLaMo is a trademark of Preferred Networks, Inc.
 
 ## Download
 
-Windows (x86_64) and Linux (x86_64) packages are on the [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page.
-To try a development version, run the **Release** workflow under **Actions** on a branch and download the packages from its artifacts.
+Windows (x86_64) and Linux (x86_64) packages are on the [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page,
+with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build from source (below).
 
-- **Windows**: unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it: llama.cpp and its CPU and Vulkan backends are loaded from there, and only from there.
+- **Windows** (10 or later): unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it:
+  llama.cpp and its CPU and Vulkan backends are loaded from there, and only from there.
+  The Visual C++ runtime is included, so nothing else needs to be installed.
 - **Linux**: extract and run `plamo-translate-desktop`. The shared libraries next to it are found through the executable's own directory (`RUNPATH=$ORIGIN`).
-  It needs a Wayland or X11 session with a Vulkan driver, which the UI uses for rendering and translation can use on the GPU, and a CJK font such as `fonts-noto-cjk`.
+  - It is built on Ubuntu 24.04 and needs glibc 2.39 or later (Ubuntu 24.04, Debian 13, Fedora 40, or newer),
+    plus `libgomp1`, `libxkbcommon-x11-0`, and `libxcb1`, which desktop installations usually have.
+  - It needs a Wayland or X11 session with a Vulkan driver, which the UI uses for rendering and translation can use on the GPU, and a CJK font such as `fonts-noto-cjk`.
+  - To add it to the application menu, run this in the extracted folder:
+
+    ```sh
+    mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+    sed "s|^Exec=.*|Exec=\"$PWD/plamo-translate-desktop\"|" plamo-translate-desktop.desktop \
+      > ~/.local/share/applications/plamo-translate-desktop.desktop
+    cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
+    ```
 
 On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 
@@ -58,7 +70,7 @@ Requirements: Rust 1.92 or later, CMake, and a C/C++ compiler.
 Linux (Ubuntu or Debian):
 
 ```sh
-sudo apt install cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev
+sudo apt install cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev
 cargo run -p plamo-translate-desktop --release
 ```
 
@@ -106,12 +118,12 @@ A GGUF path passed as the first argument (or in `PLAMO_MODEL`) overrides the mod
 
 ### Files and logs
 
-Models, the cached model list (`catalog.json`), and a small log (`app.log`) are kept in:
+Models (in `models/`), the cached model list (`catalog.json`), and a small log (`app.log`) are kept in:
 
 - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
 - Linux: `~/.local/share/plamo-translate-desktop` (`$XDG_DATA_HOME`)
 
-The log records start-up, detected devices, model loads, downloads, and deletions, but never translated text.
+The log records start-up, detected devices, model loads, downloads, deletions, settings changes, and where long texts were retried or cut, but never translated text.
 A log larger than 1 MiB is moved to `app.log.1` at start-up.
 
 Settings are in `settings.json`: `%APPDATA%\plamo-translate-desktop\config` on Windows, and `~/.config/plamo-translate-desktop` (`$XDG_CONFIG_HOME`) on Linux.
@@ -124,3 +136,6 @@ The source code of this app is licensed under either of
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option. The PLaMo models are not part of this repository and are covered by the PLaMo Community License.
+
+The packages include third-party software (Rust crates, llama.cpp, Lucide icons, and on Windows the Visual C++ runtime);
+their licenses are in `THIRD-PARTY-NOTICES.txt` in each package, generated by `scripts/notices.sh`.

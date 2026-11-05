@@ -1,0 +1,8 @@
+Microsoft Visual C++ runtime (Windows package only)
+---------------------------------------------------
+
+vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll and vcomp140.dll are the Microsoft Visual C++
+runtime and OpenMP libraries. They are redistributed next to the executable as permitted for
+Distributable Code by the Microsoft Software License Terms for Microsoft Visual Studio, so that
+the app runs without the Visual C++ Redistributable installed. They remain subject to those
+terms and are not covered by the licenses of this project.

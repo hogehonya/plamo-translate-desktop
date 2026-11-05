@@ -1,0 +1,28 @@
+Third-party software notices for PLaMo Translate Desktop
+========================================================
+
+PLaMo Translate Desktop includes the following third-party software. The Rust crates below are
+linked into the executable; llama.cpp/ggml and the other components listed after them are
+described at the end of this file.
+
+The PLaMo models are not included; they are downloaded separately and are covered by the PLaMo
+Community License.
+
+Licenses of the Rust crates
+---------------------------
+{{#each overview}}
+- {{{name}}} ({{count}})
+{{/each}}
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

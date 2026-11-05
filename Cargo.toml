@@ -16,6 +16,8 @@ pfml = { path = "crates/pfml" }
 engine = { path = "crates/engine" }
 
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Pinned to llama-cpp-rs main: the latest crates.io release (0.1.161) vendors llama.cpp 0.6.0,

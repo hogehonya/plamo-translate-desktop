@@ -19,7 +19,8 @@ BLUE = (0x0D, 0x7F, 0xDA)
 WHITE = (0xFF, 0xFF, 0xFF)
 PALE_BLUE = (0xB8, 0xD4, 0xEA)
 
-PNG_SIZES = [16, 24, 32, 48, 64, 128, 256, 512]
+# The Linux package ships the 256 px PNG with its desktop entry; the .ico embeds all ICO_SIZES.
+PNG_SIZES = [256]
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
 

@@ -1,5 +1,6 @@
 [package]
 name = "plamo-translate-desktop"
+description = "Desktop app that translates locally with PLaMo 3 Translate"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,9 +10,9 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-vulkan = ["engine/vulkan"]
+# `scripts/rocm.sh cargo run -p plamo-translate-desktop --release --features rocm`. Packages
+# enable `engine/vulkan` and `engine/dynamic-backends` directly.
 rocm = ["engine/rocm"]
-dynamic-backends = ["engine/dynamic-backends"]
 
 [dependencies]
 engine.workspace = true
@@ -20,8 +21,8 @@ async-channel = "2"
 directories = "6"
 rust-i18n = "4.2"
 sys-locale = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde.workspace = true
+serde_json.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]

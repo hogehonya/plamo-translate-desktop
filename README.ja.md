@@ -10,11 +10,11 @@
 ## 機能
 
 - 53 言語の翻訳。翻訳先の既定は「日本語 ⇄ 英語（自動）」です。
-- 貼り付けるとすぐに翻訳し、入力中の文章は手が止まってから少し待って翻訳します。
-  訳文は生成と同時に表示され、ステータスバーに現在の速度が出ます。途中で止めることもできます。
+- 貼り付けるとすぐに翻訳し、入力中の文章は手が止まってから少し待って翻訳します（ツールバーの「自動翻訳」でオフにできます）。
+  訳文は生成と同時に表示され、ステータスバーに進み具合、速度、残り時間が出ます。途中で止めることもできます。
 - 日本語の文体（敬体・常体）の指定、参考情報としての文脈、用語集（1 行に 1 語、`原語 = 訳語`）。
 - 長い文章は段落ごとに分けて順に訳します。直前の原文と訳文を履歴として渡すので、訳語や文体がそろいます。
-  訳文が同じ言葉の繰り返しに陥ったときは、それを検出して取り消し、1 文ずつ訳し直します。
+  訳文が同じ言葉の繰り返しに陥ったときは、それを検出して取り消し、小さく分けて訳し直します。それでも繰り返す箇所は打ち切り、訳文に印を付けます。
 - モデル管理機能。サイズ（0.8B、2B、8B、31B）と量子化の種類を選べます。
   - 各ファイルに、PFN が公表している翻訳精度と、量子化なしのモデルとの差を表示します。
   - ダウンロードは中断しても続きから再開でき、SHA-256 で検証します。
@@ -42,12 +42,24 @@ PLaMo は株式会社 Preferred Networks の商標です。
 ## ダウンロード
 
 Windows（x86_64）版と Linux（x86_64）版は [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) からダウンロードできます。
-開発中の版を試すときは、**Actions** でブランチを選んで **Release** ワークフローを手動で実行し、その成果物（Artifacts）からパッケージをダウンロードしてください。
+SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変更を試すときは、ソースからビルドしてください（後述）。
 
-- **Windows**: 展開して `plamo-translate-desktop.exe` を実行します。同梱の DLL は exe と同じフォルダに置いたままにしてください。llama.cpp 本体と、CPU・Vulkan のバックエンドはそこから読み込み、それ以外の場所からは読み込みません。
+- **Windows**（10 以降）: 展開して `plamo-translate-desktop.exe` を実行します。同梱の DLL は exe と同じフォルダに置いたままにしてください。
+  llama.cpp 本体と、CPU・Vulkan のバックエンドはそこから読み込み、それ以外の場所からは読み込みません。
+  Visual C++ ランタイムも同梱しているので、ほかに何かをインストールする必要はありません。
 - **Linux**: 展開して `plamo-translate-desktop` を実行します。同梱の共有ライブラリは、実行ファイル自身のフォルダ（`RUNPATH=$ORIGIN`）から読み込みます。
-  Vulkan ドライバの入った Wayland または X11 のデスクトップ環境が必要です。Vulkan は UI の描画に使い、GPU での翻訳にも使います。
-  また、`fonts-noto-cjk` などの CJK フォントが必要です。
+  - Ubuntu 24.04 でビルドしているので、glibc 2.39 以降（Ubuntu 24.04、Debian 13、Fedora 40 以降）が必要です。
+    ほかに `libgomp1`、`libxkbcommon-x11-0`、`libxcb1` が必要ですが、デスクトップ環境なら通常は入っています。
+  - Vulkan ドライバの入った Wayland または X11 のデスクトップ環境が必要です。Vulkan は UI の描画に使い、GPU での翻訳にも使います。
+    また、`fonts-noto-cjk` などの CJK フォントが必要です。
+  - アプリケーションメニューに登録するには、展開したフォルダで次を実行します。
+
+    ```sh
+    mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+    sed "s|^Exec=.*|Exec=\"$PWD/plamo-translate-desktop\"|" plamo-translate-desktop.desktop \
+      > ~/.local/share/applications/plamo-translate-desktop.desktop
+    cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
+    ```
 
 どちらも、Vulkan で使える単体 GPU があればそれで翻訳し、無ければ CPU が対応する最速の方式（AVX2 または AVX-512）で翻訳します。
 
@@ -58,7 +70,7 @@ Windows（x86_64）版と Linux（x86_64）版は [Releases](https://github.com/
 Linux（Ubuntu または Debian）:
 
 ```sh
-sudo apt install cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev
+sudo apt install cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev
 cargo run -p plamo-translate-desktop --release
 ```
 
@@ -105,12 +117,12 @@ cargo run -p engine --release --example download -- --list
 
 ### ファイルとログ
 
-モデル、モデル一覧のキャッシュ（`catalog.json`）、小さなログ（`app.log`）は次の場所に保存します。
+モデル（`models/` の下）、モデル一覧のキャッシュ（`catalog.json`）、小さなログ（`app.log`）は次の場所に保存します。
 
 - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
 - Linux: `~/.local/share/plamo-translate-desktop`（`$XDG_DATA_HOME`）
 
-ログには、起動、検出したデバイス、モデルの読み込み、ダウンロード、削除を記録します。翻訳した文章は記録しません。
+ログには、起動、検出したデバイス、モデルの読み込み、ダウンロード、削除、設定の変更、長い文章のやり直しや打ち切りの位置を記録します。翻訳した文章は記録しません。
 起動時に 1 MiB を超えていたら `app.log.1` に退避します。
 
 設定は `settings.json` に保存します。場所は、Windows では `%APPDATA%\plamo-translate-desktop\config`、Linux では `~/.config/plamo-translate-desktop`（`$XDG_CONFIG_HOME`）です。
@@ -123,3 +135,6 @@ cargo run -p engine --release --example download -- --list
 - MIT License（[LICENSE-MIT](LICENSE-MIT)）
 
 PLaMo のモデルはこのリポジトリに含まれず、PLaMo コミュニティライセンスが適用されます。
+
+配布物にはサードパーティーのソフトウェア（Rust のクレート、llama.cpp、Lucide のアイコン、Windows 版では Visual C++ ランタイム）が含まれます。
+それらのライセンスは、各配布物の `THIRD-PARTY-NOTICES.txt` にあります（`scripts/notices.sh` で生成）。

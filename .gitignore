@@ -1,1 +1,5 @@
 /target
+# Packaging scratch directories (see .github/workflows/release.yml).
+/dist
+/cli
+/THIRD-PARTY-NOTICES.txt

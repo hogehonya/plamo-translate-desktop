@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PLaMo Translate
+Comment=Translate text locally with PLaMo 3 Translate
+Exec=plamo-translate-desktop
+Icon=plamo-translate-desktop
+Terminal=false
+Categories=Office;Utility;TextTools;
+StartupWMClass=plamo-translate-desktop

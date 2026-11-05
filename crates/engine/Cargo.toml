@@ -26,8 +26,8 @@ llama-cpp-sys-2 = { workspace = true, optional = true }
 thiserror.workspace = true
 ureq = "3"
 sha2 = "0.11"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

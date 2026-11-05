@@ -62,7 +62,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev \
-            libx11-xcb-dev libssl-dev libzstd-dev \
+            libx11-xcb-dev \
             libvulkan-dev glslc spirv-headers
 
       - uses: dtolnay/rust-toolchain@stable
@@ -70,7 +70,14 @@ jobs:
       # The cache key includes the rustc version, so a new stable release starts a new cache.
       - uses: Swatinem/rust-cache@v2
 
-      - run: cargo build --workspace --profile dist --bins --examples --features "$DIST_FEATURES"
+      - run: cargo build --workspace --profile dist --bins --examples --locked --features "$DIST_FEATURES"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      - name: Third-party notices
+        run: scripts/notices.sh linux THIRD-PARTY-NOTICES.txt
 
       - name: Package
         run: |
@@ -79,7 +86,9 @@ jobs:
           mkdir -p "$dist"
           cp target/dist/plamo-translate-desktop "$dist/"
           # Newest llama-cpp-sys-2 build output with backend modules.
-          out=$(ls -td target/dist/build/llama-cpp-sys-2-*/out | head -n1)
+          backends=$(ls -td target/dist/build/llama-cpp-sys-2-*/out/backends | head -n1)
+          test -n "$backends" || { echo "llama-cpp-sys-2 backend modules not found"; exit 1; }
+          out=${backends%/backends}
           # The executables need these by SONAME and find them through RUNPATH=$ORIGIN. The
           # build tree holds them as symlinks, so copy the files they point to.
           for lib in libllama.so.0 libggml.so.0 libggml-base.so.0; do
@@ -92,7 +101,10 @@ jobs:
           for variant in x64 haswell skylakex icelake alderlake; do
             cp -L "$out/backends/libggml-cpu-$variant.so" "$dist/"
           done
-          cp README.md README.ja.md LICENSE-MIT LICENSE-APACHE assets/icon/icon-256.png "$dist/"
+          cp README.md README.ja.md LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt "$dist/"
+          # A desktop entry and its icon; README.md explains how to install them.
+          cp assets/plamo-translate-desktop.desktop "$dist/"
+          cp assets/icon/icon-256.png "$dist/plamo-translate-desktop.png"
           ls -l "$dist"
           # Smoke test with the package's own libraries: the CLI must load llama.cpp and list
           # at least the CPU. The CLI is a development tool and is not shipped.
@@ -152,7 +164,15 @@ jobs:
           key: windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-
 
-      - run: cargo build --workspace --profile dist --bins --examples --features $env:DIST_FEATURES
+      - run: cargo build --workspace --profile dist --bins --examples --locked --features $env:DIST_FEATURES
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      - name: Third-party notices
+        shell: bash
+        run: scripts/notices.sh windows THIRD-PARTY-NOTICES.txt
 
       - name: Package
         shell: pwsh
@@ -182,10 +202,24 @@ jobs:
           foreach ($variant in 'x64', 'haswell', 'skylakex', 'icelake', 'alderlake') {
             Copy-Item "$($out.FullName)\backends\ggml-cpu-$variant.dll" $dist
           }
-          foreach ($dll in 'llama.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll') {
+          # The Visual C++ runtime and OpenMP DLLs that the exe and the llama.cpp DLLs import, from
+          # the toolset that built them, so the app runs without the Redistributable installed.
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $redist = Get-ChildItem "$vs\VC\Redist\MSVC" -Directory |
+            Where-Object { $_.Name -match '^\d' -and (Test-Path "$($_.FullName)\x64") } |
+            Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+          if (-not $redist) { throw 'Visual C++ redistributable files not found' }
+          $crt = Get-ChildItem "$($redist.FullName)\x64" -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+          $omp = Get-ChildItem "$($redist.FullName)\x64" -Directory -Filter 'Microsoft.VC*.OpenMP' | Select-Object -First 1
+          foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
+            Copy-Item "$($crt.FullName)\$dll" $dist
+          }
+          Copy-Item "$($omp.FullName)\vcomp140.dll" $dist
+          foreach ($dll in 'llama.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll',
+                           'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'vcomp140.dll') {
             if (-not (Test-Path (Join-Path $dist $dll))) { throw "$dll is missing from the package" }
           }
-          Copy-Item README.md, README.ja.md, LICENSE-MIT, LICENSE-APACHE $dist
+          Copy-Item README.md, README.ja.md, LICENSE-MIT, LICENSE-APACHE, THIRD-PARTY-NOTICES.txt $dist
           Get-ChildItem $dist | Format-Table Name, Length
           # Smoke test with the package's own DLLs: the CLI must load llama.cpp and list at least
           # the CPU. The CLI is a development tool and is not shipped.
@@ -227,7 +261,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
+          (cd packages && sha256sum -- * > SHA256SUMS.txt)
           ls -l packages
+          cat packages/SHA256SUMS.txt
           gh release create "v$VERSION" packages/* \
             --title "PLaMo Translate Desktop $VERSION" \
             --generate-notes \

@@ -1,6 +1,6 @@
 # PLaMo Translate Desktop — Design
 
-Status: agreed, 2026-11-05. Changes are made by editing this file.
+Status: describes v0.1.0 (2026-11-05). Update it together with the code.
 
 ## 1. Goal
 
@@ -66,26 +66,36 @@ The backend trait (§6) keeps the door open.
 ```
 crates/
   pfml/     PFML3 prompt builder, language table, validation. Pure Rust, no I/O.
-  engine/   Backend trait, llama.cpp backend, model catalog, downloader, text chunker.
-            No GUI dependency. examples/translate.rs is a headless CLI for testing.
+  engine/   Backend trait, llama.cpp backend, model catalog and discovery, downloader,
+            long-text splitting and loop detection. No GUI dependency.
+            examples/translate.rs and examples/download.rs are headless CLIs for testing.
   app/      GPUI application (binary `plamo-translate-desktop`).
+assets/     Icon (scripts/gen_icons.py) and the Linux desktop entry.
+licenses/   License texts appended to THIRD-PARTY-NOTICES.txt (scripts/notices.sh).
+scripts/    Icon generator, notices generator, ROCm build environment.
 docs/       This document.
 ```
 
 ### 4.2 Threads
 
 ```
-GPUI main thread ──Command──▶ inference worker (one std::thread, owns backend/model/context)
-      ▲  ◀──Event──────────────┘   Loaded | LoadFailed | Token | Done | Error
+GPUI main thread ──Command──▶ inference worker (one std::thread, owns runtime/model/context)
+      ▲  ◀──Event──────────────┘
       └──◀── download threads ─── Progress | Finished | Failed
 ```
 
-- The inference worker owns all llama.cpp state, so llama.cpp objects never cross threads.
-  Commands are `LoadModel`, `Unload`, `Translate { job_id, request }`, and `Cancel { job_id }`.
-- A new `Translate` command cancels the running job. This is what auto-translate needs.
-  Cancellation is an `AtomicBool` checked after every generated token.
-- The UI receives events through `async-channel` in a `cx.spawn` task and updates its entities.
-  Translated text streams into the output pane token by token.
+- The inference worker (`engine::worker`) owns all llama.cpp state, so llama.cpp objects never cross threads.
+  Commands are `Load`, `Unload`, and `Translate { job, options, document, text }`.
+- Events: `RuntimeFailed`, `Devices`, `LoadProgress`, `Loaded`, `LoadFailed`, `Unloaded`,
+  and per job `Chunk`, `Token`, `Rewind`, `Retry`, `Cut`, `Finished`, `Failed`.
+  A panic of the worker thread is reported as `RuntimeFailed`.
+- Jobs supersede each other: a shared `AtomicU64` holds the newest job id, so submitting a translation
+  cancels the running one (checked before every generated token) and stale queued jobs are skipped.
+  This is what auto-translate needs.
+- Each load ends in exactly one `Loaded` or `LoadFailed`. Load events carry no id, so the app counts outstanding loads
+  and acts only on the last one.
+- The UI receives events through `async-channel` and applies them in batches of one 50 ms frame,
+  so a fast GPU does not stall the UI thread.
 - Download threads throttle progress events to about 10 Hz.
 
 ## 5. Prompt construction (crate `pfml`)
@@ -124,16 +134,17 @@ official `chat_template.jinja`:
 pub trait TranslationBackend {
     fn translate(
         &mut self,
-        request: &TranslateRequest,
+        prompt: &pfml::Prompt<'_>,
+        generation: &Generation, // output length limit, DRY on or off
         sink: &mut dyn FnMut(&str),
-        cancel: &AtomicBool,
+        is_cancelled: &dyn Fn() -> bool,
     ) -> Result<TranslateStats>;
 }
 ```
 
-The first implementation is `LlamaCppBackend`:
+The implementation is `engine::llama::Session` (one llama.cpp context of a loaded `Model`):
 
-- At startup it loads the ggml backend modules next to the executable (`load_backends_from_path`),
+- At startup `Runtime::init` loads the ggml backend modules next to the executable (`load_backends_from_path`),
   then lists devices with `list_llama_ggml_backend_devices()`.
 - Model parameters: the selected device(s) (`with_devices`) and the number of GPU layers (all by default).
   - A fully offloaded model is read instead of memory-mapped. A mapping keeps the whole file in the process's memory
@@ -141,7 +152,7 @@ The first implementation is `LlamaCppBackend`:
     Measured with ROCm while translating: 0.8B uses 335 MiB instead of 964 MiB, and 2B 374 MiB instead of 2,142 MiB
     (214 MiB of either is the ROCm libraries). Loading takes the same 1–2 s.
   - On the CPU (or with partial offload) the file stays memory-mapped: those pages are the weights in use.
-- Context: `n_ctx` defaults to 16384 and can be configured up to 32768.
+- Context: `n_ctx` is fixed at 32768 (see §8).
 - Decoding is greedy. It stops on the `<|plamo:tag|>` token, on any end-of-generation token (`<|plamo:bos|>` is the EOS),
   on cancellation, when the context is full, or when the output runs away (6.1).
 - Output is decoded incrementally, so a UTF-8 sequence split across tokens is never shown half-finished.
@@ -159,12 +170,16 @@ The first implementation is `LlamaCppBackend`:
     2. Sentence ends (`。！？．`, or `.!?` before whitespace), keeping closing quotes and brackets with their sentence.
        Other line breaks are ordinary whitespace here, so hard-wrapped prose keeps its sentences whole.
     3. Any line break, for a sentence that is still too long.
+    4. After clause punctuation (`、，,;；:：`) or at whitespace.
+    5. By character count, the last resort for text without any of the above (minified data, for example),
+       so that no chunk exceeds the budget.
+  - Pieces are packed on summed token counts; the packed text is measured exactly only near the limit.
   - Leading whitespace and the separators between chunks are copied unchanged into the output.
 - Budget: a chunk gets at most 1,024 tokens and history at most 4,096 (`DocumentOptions`).
   Settings → Chunk size and History change these (256–4,096 and none–8,192 tokens; other values can be set in `settings.json`).
   They are part of the translation cache key.
   They are further limited to 1/6 and 1/3 of `n_ctx` minus the fixed parts (context and glossary, plus a margin of 64 tokens),
-  so the output always has room for three times the chunk.
+  which leaves the output room for about three times the chunk.
 - Why chunks are small, although the model was trained on 32k tokens:
   - PLaMo 3 attends to only the last 2,048 tokens in 7 of every 8 layers. Small models decoding greedily lose their place in long outputs.
   - Measured with 0.8B Q4_K_M on the first 250 KB of an English book (Project Gutenberg #5000, into Japanese, ROCm):
@@ -204,7 +219,9 @@ The first implementation is `LlamaCppBackend`:
     The engine emits the marker itself, keeping the output offsets it reports in step with the text.
   - The app logs retries and cuts to `app.log` (without text, with the source character position of a cut).
     The status bar reports cuts; clicking it selects the next cut passage in both panes.
-- The worker reports `Chunk { index, count }`, and the status bar shows progress such as `(2/5)`.
+- The worker reports `Chunk { index, count, source }`. The status bar shows the chunk (`(2/5)`), the tokens generated,
+  the speed, and the remaining time. The estimate counts progress in source bytes, with the chunk in progress weighted by its output
+  against the output per source byte of the finished chunks; it appears once a chunk is done.
 
 ### 6.2 Context and glossary
 
@@ -230,7 +247,11 @@ The first implementation is `LlamaCppBackend`:
   - Each file shows Ja↔En (PFTB) and multilingual (FLORES+ Ja↔) scores with the difference from BF16.
     Drops beyond 0.003 / 0.3 are amber, and beyond 0.008 / 0.8 red.
   - Files without published figures (discovered later) say so.
-- Download (`engine::download`): `GET https://huggingface.co/<repo>/resolve/<revision>/<file>` into `<file>.part`. It uses `ureq` on its own thread.
+- Cached entries are dropped unless they look like what discovery produces (repository and file name patterns, hex digests),
+  because the file name becomes a path that is written and deleted.
+- Download (`engine::download`): `GET https://huggingface.co/<repo>/resolve/<revision>/<file>` into `<file>.<digest>.part`
+  (named after the expected SHA-256, so a partial file of an older revision is never resumed). It uses `ureq` on its own thread,
+  with a 30 s read timeout so a stalled connection cannot block cancellation.
   - Hugging Face redirects to a CDN that honours `Range`, so an interrupted or cancelled download resumes from the partial file.
   - The existing part is hashed first, so the digest always covers the whole file.
   - The file is renamed into place only after the SHA-256 matches, so a final file of the right size counts as downloaded.
@@ -242,7 +263,7 @@ The first implementation is `LlamaCppBackend`:
   - Linux: `$XDG_DATA_HOME/plamo-translate-desktop/models` (usually `~/.local/share/...`)
   - Both come from `directories::ProjectDirs::data_local_dir()`.
   - A GGUF path given on the command line or in `PLAMO_MODEL` overrides the selection (for development).
-- The Models dialog opens from the model button in the title bar. Each row shows its state and actions:
+- The Models dialog opens from the model button in the status bar. Each row shows its state and actions:
   - Not downloaded: Download.
   - Downloading: a progress bar and Cancel.
   - Paused: Resume and Delete.
@@ -255,8 +276,8 @@ The first implementation is `LlamaCppBackend`:
     Afterwards it shows only "Built with PLaMo · PLaMo Community License".
 - Startup picks the first available of: the saved selection if downloaded, 2B Q4_K_M if downloaded, any downloaded model.
   With no model, the Models dialog opens and the first finished download becomes active automatically.
-- The model marked "Recommended" is 2B Q4_K_M until M3 provides device memory.
-  `engine::models::recommend` then picks the largest Q4_K_M up to 8B whose file is at most 2/3 of the available memory.
+- The model marked "Recommended" comes from `engine::models::recommend`: the largest Q4_K_M up to 8B whose file is
+  at most 2/3 of the free memory of the selected device (system memory for the CPU).
 
 ## 8. Backend selection
 
@@ -278,28 +299,25 @@ The first implementation is `LlamaCppBackend`:
   because it is memory-bound.
 - Memory check: the app estimates the file size × 1.2 + 384 MiB.
   If that exceeds the free memory of the selected device, the dialog shows a warning; the model still loads.
-- The "Recommended" model is the largest Q4_K_M up to 8B that fits the free memory of the selected device
-  (system memory for the CPU).
-- Changing the device reloads the model. The title bar shows the model and the device, for example `2B · Q4_K_M · Vulkan0`.
+- Changing the device reloads the model. The status bar shows the model and the device, for example `2B · Q4_K_M · Vulkan0`.
 
 ## 9. UI
 
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│ [Auto detect ▾] ⇄ [Japanese ▾]  Style [Polite ▾]  ● 2B Q4_K_M · Vulkan0 ▾ │
-├────────────────────────────────┬──────────────────────────────────┤
-│ Source                         │ Translation (streaming)          │
-│                                │                                  │
-│ 1,234 chars          [Clear]   │                          [Copy]  │
-├────────────────────────────────┴──────────────────────────────────┤
-│ ▸ Context / Glossary                                              │
-├───────────────────────────────────────────────────────────────────┤
-│ Ready · 42.1 tok/s                         [Translate  Ctrl+Enter] │
-└───────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ PLaMo Translate                                                     _  □  × │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [Detect ▾]  ⇄  [Japanese ⇄ English ▾]  [Style ▾]   Context & glossary  (o) Auto [Translate] │
+├───────────────────────────────────────┬──────────────────────────────────────┤
+│ Source                                │ Translation (streaming)              │
+│ 1,234 chars                  [Clear]  │                              [Copy]  │
+├───────────────────────────────────────┴──────────────────────────────────────┤
+│ Translating… (3/12) · 4,210 tokens · 250.3 tok/s · about 2 min left   [2B · Q4_K_M · Vulkan1] ⚙ Built with PLaMo │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- Auto-translate is on by default.
-  - A paste (a large input change) translates immediately. Typing is debounced by about 600 ms.
+- Auto-translate is on by default; the Auto switch in the toolbar turns it off.
+  - A paste translates immediately. Typing is debounced by 500 ms. With Auto off, only Translate (or `Ctrl+Enter`) translates.
   - Editing the input cancels the running job and starts a new one.
   - Results are cached by (input, settings), so swapping languages back and forth costs nothing.
 - The source pane has focus at startup. `Ctrl+Shift+C` copies the translation, and `Ctrl+Enter` translates immediately.
@@ -316,13 +334,18 @@ The first implementation is `LlamaCppBackend`:
 - Translation options:
   - Style (plain or polite) is shown only for a Japanese target.
   - Context is a separate textarea.
-  - The glossary is a table that can be imported and exported as TSV.
+  - The glossary is a text area (see §6.2).
 - The Models & Backend dialog lists the catalog with status and Download, Cancel, Use, and Delete actions,
   a progress bar showing rate and ETA, and the backend and device settings.
-- While a translation runs, the Translate button becomes Stop. Stopping keeps the partial output, and that partial output is never cached.
+- While a translation runs, the Translate button becomes Stop. Stopping keeps the partial output; it is marked partial,
+  so it is never cached and the same request translates again.
+- Streamed text is applied as edits at the end of the output pane. Replacing the whole value every frame laid out the entire translation
+  again and stalled the UI on long texts.
+- The status bar ends a translation with the time taken, the tokens, and the speed. When passages were cut, clicking the message selects the next one in both panes.
+- Settings (the gear): display language, theme, chunk size, history, and synchronized scrolling.
 - Streaming keeps the output pane's scroll position, so a reader can scroll through a long translation while it grows.
   A new translation starts at the top.
-- Japanese IME input must work on both platforms. This is checked in M0.
+- Japanese IME input goes through gpui-kit's textarea.
 - Synchronized scrolling (Settings, on by default; `crates/app/src/align.rs`):
   - Chunk starts are known pairs of source and output positions. Within a chunk, paragraphs (blank-line separated, or lines in text without blank lines)
     are paired when both sides have the same number; otherwise the chunk is one segment. Positions inside a segment map proportionally.
@@ -344,9 +367,11 @@ Future idea: a global hotkey that translates the clipboard (with the `global-hot
 
 ## 10. Settings
 
-The app saves `settings.json` in the platform config directory (M2 stores the selected model and the license acceptance). The full set is UI language, theme, the selected model,
-the backend (device, GPU layers, `n_ctx`, threads), the last language pair, the translation options, glossaries,
-the auto-translate flag, the window geometry, and the license acceptance record.
+The app saves `settings.json` in the platform config directory (`crates/app/src/settings.rs`):
+the selected model, the license acceptance, the device, the glossary, the UI language, the theme,
+the chunk and history sizes, and synchronized scrolling.
+The language pair, style, context, auto-translate flag, and window geometry are not saved.
+A file that does not parse is kept as `settings.json.invalid` instead of being overwritten.
 
 ## 11. Build, test, and distribution
 
@@ -355,7 +380,6 @@ the auto-translate flag, the window geometry, and the license acceptance record.
   ROCm, however, supports WSL2. The `rocm` feature (built with `scripts/rocm.sh`) runs the model on the RX 9070 XT from WSL2.
   For 2B Q4_K_M, generation runs at about 120–150 tok/s, against about 20 tok/s on the CPU.
   ggml also lists the integrated GPU, but only the discrete GPU's architecture is compiled; automatic selection skips integrated GPUs anyway.
-- Local Windows builds and test runs use `/mnt/e/` (a ReFS dev drive), which is faster than `C:`.
 - Windows binaries are built natively on GitHub Actions `windows-2025` (MSVC, Windows SDK, and CMake are preinstalled;
   the Vulkan SDK is installed by the workflow), not cross-compiled. Cross-compiling from Linux fails:
   - The `gpui-pre-windows` build script compiles its HLSL shaders with `fxc.exe` only when the build host is Windows.
@@ -365,6 +389,8 @@ the auto-translate flag, the window geometry, and the license acceptance record.
 - Build configurations:
   - Windows: features `engine/vulkan` and `engine/dynamic-backends`. llama.cpp is built as DLLs
     (`llama.dll`, `ggml*.dll`), and the backend modules sit next to the exe.
+    - The exe and the DLLs import the Visual C++ runtime and OpenMP (`vcruntime140*.dll`, `msvcp140.dll`, `vcomp140.dll`).
+      The package ships them from the toolset that built it, so the Redistributable need not be installed.
     - A machine without a working Vulkan driver simply does not list a Vulkan device.
     - Five CPU variants are shipped: `x64`, `haswell` (AVX2), `skylakex` and `icelake` (AVX-512), and `alderlake` (AVX-VNNI).
       ggml loads the best one the CPU supports.
@@ -381,55 +407,53 @@ the auto-translate flag, the window geometry, and the license acceptance record.
     - The package ships the Vulkan backend and the same five CPU variants as Windows.
       On native Linux with a Vulkan driver, the discrete GPU is used.
       WSL2 has no GPU Vulkan driver, so there the app uses the CPU, or the GPU through ROCm (`scripts/rocm.sh`).
+    - Built on Ubuntu 24.04, so it needs glibc 2.39 or later. It also needs `libgomp1`, `libxkbcommon-x11-0`, `libxcb1`,
+      a Vulkan driver (the UI renders with Vulkan), and a CJK font (for example `fonts-noto-cjk`; a minimal WSL image has none).
   - Packages use the `dist` profile (fat LTO, one codegen unit, stripped).
     The Linux app binary is 34.5 MB this way, against 73.7 MB for a release build with llama.cpp linked statically.
     Lints and tests run on Linux only, so Windows code is compiled only by the Release workflow.
   - The `translate` CLI is built and used for a smoke test (`--list-devices` with the package's own libraries), but it is not shipped.
 - The Release workflow builds the packages, with the latest stable Rust:
-  - Pushing a tag `vX.Y.Z` publishes a GitHub release with generated notes. The tag must match the workspace version.
+  - Pushing a tag `vX.Y.Z` publishes a GitHub release with generated notes and `SHA256SUMS.txt`. The tag must match the workspace version.
   - A manual run (**Run workflow**, from any branch) builds the same packages as workflow artifacts without publishing,
-    versioned `X.Y.Z-dev.<commit>`.
-  - Windows: a portable zip with the exe, the DLLs and backend modules, the READMEs, and the licenses.
-  - Linux: a tar.gz with the same contents and the icon (an AppImage comes later).
+    versioned `X.Y.Z-dev.<commit>`, plus the Windows `translate.exe` for testing the engine on Windows GPUs.
+  - Windows: a portable zip with the exe, the DLLs and backend modules, the Visual C++ runtime, the READMEs, the licenses,
+    and `THIRD-PARTY-NOTICES.txt`.
+  - Linux: a tar.gz with the same contents (no Visual C++ runtime), a desktop entry, and its icon.
+  - `THIRD-PARTY-NOTICES.txt` is generated by `scripts/notices.sh`: cargo-about (`about.toml`, `about.hbs`) for the Rust crates,
+    then `licenses/` for llama.cpp/ggml, the Lucide icons, and (Windows) the Visual C++ runtime.
   - Build caches are keyed on the rustc version. A tag can restore only its own caches and those of the default branch,
     so a manual run on `main` before tagging makes the release build warm.
 - Windows-specific behaviour (DirectX rendering, IME, Vulkan performance on real hardware) is checked by running Release artifacts on the Windows host.
-  Once the app is feature-complete, the repo is also built and run locally on Windows.
 - Icon: a white block "p" on a blue rounded tile, after the PLaMo logo. `scripts/gen_icons.py` produces `assets/icon/`
-  (SVG, PNGs from 16 to 512 px, and a multi-size `.ico`) using only the Python standard library.
+  (SVG, a 256 px PNG, and a multi-size `.ico`) using only the Python standard library.
   On Windows, `crates/app/build.rs` embeds the icon as resource ID 1, which GPUI loads for its windows.
-  On Linux, the window `app_id` is `plamo-translate-desktop`, to match a desktop entry (M5).
+  On Linux, the window `app_id` is `plamo-translate-desktop`, matching `assets/plamo-translate-desktop.desktop`.
 - Attribution: "Built with PLaMo" appears in the status bar, the Models dialog, and the README (PLaMo Community License, Article 4).
-- Linux build dependencies: `libxkbcommon-x11-dev libwayland-dev libfontconfig-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1`, plus a Vulkan driver and CMake.
-  CJK text needs a CJK font at runtime (for example `fonts-noto-cjk`). A minimal WSL image ships none.
+- Linux build dependencies: CMake and `libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev`,
+  plus `libvulkan-dev glslc spirv-headers` for the Vulkan backend.
 
-## 12. Milestones
+## 12. Status and later work
 
-- **M0 — feasibility**
-  - `pfml` with unit tests.
-  - Headless CLI that translates with `llama-cpp-2` (Linux CPU; Windows Vulkan via CI artifact).
-  - `dynamic-backends` lists the AMD GPU on Windows.
-  - A gpui-kit window with a working textarea and IME on both platforms.
-  - CI for Windows and Linux.
-- **M1 — MVP**: two-pane UI, language selection, streaming translation, cancellation, and auto-translate. The model path is fixed.
-- **M2 — model management**: catalog, download (progress, resume, verify, delete), and first-run onboarding.
-- **M3 — backend selection**: device list, GPU layers, `n_ctx`, threads, and the memory estimate.
-- **M4 — translation options**: style, context, glossary, and long text with history.
-- **M5 — distribution**:
-  - Release workflow (done).
-  - Icon (done).
-  - Third-party license notices for Lucide icons (ISC/MIT), llama.cpp (MIT), GPUI (Apache-2.0), and the other Rust crates.
-  - Linux desktop entry.
-  - Settings polish.
-  - The local Windows build check.
+Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2), device selection (M3),
+translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
+
+Possible later work:
+
+- Reuse the KV cache prefix between chunks (each request starts from an empty cache today).
+- Partial GPU offload for models larger than the GPU memory.
+- An AppImage or distribution packages for Linux; signing the Windows executable.
+- A global hotkey that translates the clipboard.
+- Remote inference backends (§1).
 
 ## 13. Risks
 
-| Risk | Mitigation |
+| Risk | Status |
 |---|---|
-| The `plamo3` implementation in the vendored llama.cpp differs from the reference | Compare CLI output with the model card examples in M0. Done: the outputs match on CPU |
-| `llama-cpp-2` releases lag behind llama.cpp | Pin a git revision when needed, and move back to crates.io once a release catches up |
-| `dynamic-backends` with Vulkan does not build on Windows MSVC | Fall back to a statically linked Vulkan build, or ship two exe variants |
-| IME or text input gaps in gpui-kit's textarea | Check in M0; patch or contribute upstream if needed |
-| gpui-pre snapshots break the API often | Pin exact versions and update deliberately |
-| Long llama.cpp + Vulkan shader builds in CI | Build packages only in the Release workflow; cache the target dir (`Swatinem/rust-cache` on Linux, `actions/cache` on Windows) |
+| The `plamo3` implementation in the vendored llama.cpp differs from the reference | Resolved: CLI output matches the model card examples |
+| `llama-cpp-2` releases lag behind llama.cpp | Open: pinned to a git revision; move back to crates.io once a release vendors llama.cpp ≥ 0.8.0 |
+| `dynamic-backends` with Vulkan does not build on Windows MSVC | Resolved: the Release workflow builds it |
+| IME or text input gaps in gpui-kit's textarea | Open: patch or contribute upstream if reported |
+| gpui-pre snapshots break the API often | Open: exact versions are pinned and updated deliberately |
+| Long llama.cpp + Vulkan shader builds in CI | Resolved: packages are built only in the Release workflow, with cached target directories |
+| Small models loop or skip text in long outputs | Mitigated: small chunks, loop detection, retries, and cut markers (§6.1) |
