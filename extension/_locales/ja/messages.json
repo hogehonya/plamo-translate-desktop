@@ -150,7 +150,7 @@
     "message": "インドネシア語"
   },
   "settings": {
-    "message": "モデルとデバイス"
+    "message": "設定"
   },
   "model": {
     "message": "モデル"
@@ -249,5 +249,8 @@
   },
   "pageNothing": {
     "message": "翻訳する文章がありません"
+  },
+  "pageResume": {
+    "message": "再開"
   }
 }

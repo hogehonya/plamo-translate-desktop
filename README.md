@@ -74,10 +74,11 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
 3. Select text on a page, right-click, and choose **Translate with PLaMo**: the side panel shows the translation as it streams in.
    The toolbar button opens the panel to type or paste text.
 4. To translate a whole page, right-click it and choose **Translate this page with PLaMo** (or **Translate page** in the panel).
-   Paragraphs are translated in place, visible ones first, keeping links and formatting; a box at the bottom right shows the progress
-   and can stop or restore the page. **Pages** in the panel's settings shows translations below the original instead.
+   Paragraphs are translated in place, keeping links and formatting: those in view first, and when you scroll, the ones you scrolled to.
+   A box at the bottom right shows the progress and can stop, resume, or restore the page.
+   **Pages** under **Settings** in the panel shows translations below the original instead.
 
-The host uses the model and device selected in the app unless you choose others under **Model and device** in the panel
+The host uses the model and device selected in the app unless you choose others under **Settings** in the panel
 (any downloaded model; downloads stay in the app). It loads its own copy of the model, so with the app open as well the model is in memory twice.
 It ends, freeing the memory, after 5 minutes without use or when you choose **Release** in the panel; the next translation starts it again.
 To update the app in place, release it and close the app first (the host keeps its files open). If you move the app's folder, choose Connect again.

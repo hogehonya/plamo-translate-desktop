@@ -477,7 +477,8 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     PLaMo 3 Translate keeps such tags in place and reorders them with the sentence (checked with 0.8B and 2B, HTML and Markdown).
   - The translation is parsed inertly (`DOMParser`) and rebuilt from text nodes and clones of the run's own elements, looked up by index,
     so links keep their targets and nothing the model writes can add attributes, elements, or scripts. Unknown or repeated indices keep only their text.
-  - The runs in view go first. New content (infinite scrolling) is picked up by a `MutationObserver`.
+  - The runs in view go first; when scrolling stops, the pending runs in view move to the front of the queue (`prioritize`).
+    New content (infinite scrolling) is picked up by a `MutationObserver`. Stop keeps what is translated, and Resume sends the rest.
   - Replacing (the default) or showing the translation below the original (without the copies' ids); the original nodes are kept to restore the page.
   - The host's `translate_segments` translates the runs of a batch in order with the earlier ones as history (`engine::document::translate_segments`).
 - Limits:

@@ -48,6 +48,8 @@
   let done = 0;
   let observer = null;
   let ui = null;
+  /** Stopped by the user, with paragraphs left that Resume would translate. */
+  let stopped = false;
 
   // ---- Collecting runs ----
 
@@ -245,8 +247,7 @@
     // Visible paragraphs first, then the rest in reading order.
     const height = window.innerHeight;
     const position = (run) => {
-      const el = run[0].nodeType === Node.ELEMENT_NODE ? run[0] : run[0].parentElement;
-      const top = el?.getBoundingClientRect().top ?? 0;
+      const top = anchor(run)?.getBoundingClientRect().top ?? 0;
       return top >= -50 && top < height ? top - 1e9 : top < 0 ? 1e9 - top : top;
     };
     const items = runs
@@ -282,15 +283,18 @@
           b { color: #0d7fda; }
         </style>
         <div class="box"><b>PLaMo</b><span class="text"></span>
-          <button class="stop"></button><button class="undo"></button><button class="close">×</button></div>`;
+          <button class="stop"></button><button class="resume"></button><button class="undo"></button><button class="close">×</button></div>`;
       ui = {
         host,
         text: root.querySelector(".text"),
         stop: root.querySelector(".stop"),
+        resume: root.querySelector(".resume"),
         undo: root.querySelector(".undo"),
         close: root.querySelector(".close"),
       };
       ui.stop.textContent = t("stop");
+      ui.resume.textContent = t("pageResume");
+      ui.resume.onclick = () => start();
       ui.undo.textContent = t("pageUndo");
       ui.stop.onclick = stop;
       ui.undo.onclick = undo;
@@ -303,16 +307,43 @@
     const working = pending.size > 0;
     ui.text.textContent = message ?? (working ? t("pageProgress", String(done), String(total)) : t("pageDone", String(done)));
     ui.stop.hidden = !working;
+    ui.resume.hidden = working || !stopped;
     ui.undo.hidden = applied.length === 0;
   }
 
   function stop() {
     port?.postMessage({ type: "cancel" });
+    // The paragraphs not translated yet can be sent again by Resume.
+    for (const item of pending.values()) for (const node of item.run) handled.delete(node);
+    stopped = pending.size > 0;
     pending.clear();
     observer?.disconnect();
     observer = null;
     render(t("pageStopped"));
   }
+
+  /** The element whose position stands for `run`. */
+  function anchor(run) {
+    return run[0].nodeType === Node.ELEMENT_NODE ? run[0] : run[0].parentElement;
+  }
+
+  // When scrolling stops, the paragraphs in view move to the front of the queue.
+  let scrollTimer = null;
+  function onScroll() {
+    if (!pending.size || !port) return;
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      const height = window.innerHeight;
+      const visible = [...pending.entries()]
+        .map(([sid, item]) => ({ sid, rect: anchor(item.run)?.getBoundingClientRect() }))
+        .filter(({ rect }) => rect && rect.bottom > -100 && rect.top < height + 100)
+        .sort((a, b) => a.rect.top - b.rect.top)
+        .map(({ sid }) => sid);
+      if (visible.length) port?.postMessage({ type: "prioritize", sids: visible });
+    }, 250);
+  }
+  // Captured, so scrolling inside containers counts too.
+  document.addEventListener("scroll", onScroll, { capture: true, passive: true });
 
   function undo() {
     stop();
@@ -329,6 +360,7 @@
   // ---- Start ----
 
   async function start() {
+    stopped = false;
     const settings = await chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" });
     mode = settings.pageMode;
     style = settings.style;

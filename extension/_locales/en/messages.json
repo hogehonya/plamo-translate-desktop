@@ -150,7 +150,7 @@
     "message": "Indonesian"
   },
   "settings": {
-    "message": "Model and device"
+    "message": "Settings"
   },
   "model": {
     "message": "Model"
@@ -249,5 +249,8 @@
   },
   "pageNothing": {
     "message": "Nothing to translate"
+  },
+  "pageResume": {
+    "message": "Resume"
   }
 }

@@ -245,6 +245,16 @@ function onPageMessage(port, message) {
     case "cancel":
       stopPage(tabId);
       break;
+    case "prioritize": {
+      // Paragraphs the user scrolled to go first, in the order given.
+      const page = pages.get(tabId);
+      if (!page) break;
+      const order = new Map(message.sids.map((sid, i) => [sid, i]));
+      const first = page.pending.filter((item) => order.has(item.sid));
+      first.sort((a, b) => order.get(a.sid) - order.get(b.sid));
+      page.pending = [...first, ...page.pending.filter((item) => !order.has(item.sid))];
+      break;
+    }
   }
 }
 
