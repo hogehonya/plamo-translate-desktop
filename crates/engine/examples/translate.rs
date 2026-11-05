@@ -120,10 +120,7 @@ fn main() -> anyhow::Result<()> {
             )
             .init();
     }
-    let runtime = Runtime::init(RuntimeOptions {
-        logs: args.verbose,
-        backends_dir: None,
-    })?;
+    let runtime = Runtime::init(RuntimeOptions { logs: args.verbose })?;
 
     if args.list_devices {
         for d in runtime.devices() {

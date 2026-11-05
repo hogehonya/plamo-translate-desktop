@@ -39,11 +39,6 @@ impl LangCode {
     pub fn is_japanese(&self) -> bool {
         self.0 == "ja"
     }
-
-    /// Looks up display metadata for this code, if it is one of the supported languages.
-    pub fn language(&self) -> Option<&'static Language> {
-        find_language(&self.0)
-    }
 }
 
 impl FromStr for LangCode {

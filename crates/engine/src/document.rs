@@ -1,9 +1,9 @@
 //! Splitting long texts into chunks, and translating them in order.
 //!
 //! Text is split at blank lines (paragraphs). Short neighbouring paragraphs are packed into one
-//! chunk, and a paragraph that alone exceeds the budget is split again at sentence ends, then,
-//! for a sentence that is still too long, at line breaks. Separators between chunks are kept
-//! verbatim so the translation preserves the layout.
+//! chunk, and a paragraph that alone exceeds the budget is split again at the most natural
+//! boundary that makes it fit (see [`Boundary`]). Separators between chunks are kept verbatim so
+//! the translation preserves the layout.
 //!
 //! [`translate_document`] translates the chunks in order and passes the most recent
 //! source/translation pairs as history, so terminology and style stay consistent.
@@ -13,8 +13,8 @@
 //! loop when one output runs much longer than that. When an output still runs away (see
 //! [`crate::repetition`]), it is withdrawn ([`Output::Truncate`]) and the chunk is translated
 //! again in pieces of a few sentences; a piece that runs away again is retried sentence by
-//! sentence, and a sentence with repetition penalized, cut if even that loops. Output that ran away never enters the history, so one
-//! loop cannot seed the next.
+//! sentence, and a sentence with repetition penalized, cut if even that loops. Output that ran
+//! away never enters the history, so one loop cannot seed the next.
 
 use std::time::Duration;
 
@@ -70,9 +70,10 @@ pub enum Progress {
         reason: StopReason,
         pieces: usize,
     },
-    /// The output for a sentence of chunk `index` ran away even with repetition penalized, and
-    /// was cut. `source` is the sentence's byte range in the text, and `output` the range of
-    /// what was kept of its translation in the output.
+    /// The output for a piece of chunk `index` that could not be split further (usually one
+    /// sentence) ran away even with repetition penalized, and was cut. `source` is the piece's
+    /// byte range in the text, and `output` the range of what was kept of its translation in the
+    /// output, including the cut marker.
     Cut {
         index: usize,
         reason: StopReason,
@@ -114,8 +115,7 @@ pub struct Split<'a> {
     pub chunks: Vec<Chunk<'a>>,
 }
 
-/// Splits `text` so each chunk measures at most `max_tokens` with `count_tokens`, where possible.
-/// A single sentence longer than the budget is kept whole.
+/// Splits `text` so each chunk measures at most `max_tokens` with `count_tokens`.
 pub fn split<'a>(
     text: &'a str,
     max_tokens: usize,
@@ -137,16 +137,29 @@ pub fn split<'a>(
         );
     }
 
-    // Pack neighbouring pieces while they fit.
+    // Pack neighbouring pieces while they fit. Token counts are nearly additive, so the pieces
+    // are counted once and the packed text is measured only near the limit.
+    let counts: Vec<usize> = pieces
+        .iter()
+        .map(|&(start, end, _)| count_tokens(&text[start..end]))
+        .collect();
     let mut chunks = Vec::new();
     let mut i = 0;
     while i < pieces.len() {
         let (start, mut end, mut sep_end) = pieces[i];
+        let mut estimate = counts[i];
         let mut j = i + 1;
         while j < pieces.len() {
-            let (_, next_end, next_sep_end) = pieces[j];
-            if count_tokens(&text[start..next_end]) > max_tokens {
-                break;
+            let (next_start, next_end, next_sep_end) = pieces[j];
+            let next_estimate = estimate + count_tokens(&text[end..next_start]) + counts[j];
+            if next_estimate > max_tokens - max_tokens / 16 {
+                let exact = count_tokens(&text[start..next_end]);
+                if exact > max_tokens {
+                    break;
+                }
+                estimate = exact;
+            } else {
+                estimate = next_estimate;
             }
             end = next_end;
             sep_end = next_sep_end;
@@ -171,10 +184,14 @@ enum Boundary {
     Sentence,
     /// Any line break.
     Line,
+    /// After a comma or other clause punctuation, or at whitespace.
+    Clause,
+    /// Anywhere: the last resort, for text such as minified data without any of the above.
+    Characters,
 }
 
 /// Appends `range` to `out` if it fits in `max_tokens`, or else its parts split at `boundary`,
-/// each refined further at the next boundary. A piece without any boundary is kept whole.
+/// each refined further at the next boundary.
 fn refine(
     text: &str,
     range: (usize, usize, usize),
@@ -197,7 +214,18 @@ fn refine(
             sentences(text, start, end, sep_end, false),
             Some(Boundary::Line),
         ),
-        Boundary::Line => (sentences(text, start, end, sep_end, true), None),
+        Boundary::Line => (
+            sentences(text, start, end, sep_end, true),
+            Some(Boundary::Clause),
+        ),
+        Boundary::Clause => (
+            clauses(text, start, end, sep_end),
+            Some(Boundary::Characters),
+        ),
+        Boundary::Characters => (
+            by_characters(text, start, end, sep_end, max_tokens, count_tokens),
+            None,
+        ),
     };
     for part in parts {
         match next {
@@ -207,17 +235,88 @@ fn refine(
     }
 }
 
+/// Sentence-ending punctuation that ends a sentence wherever it occurs.
+fn is_terminal(c: char) -> bool {
+    matches!(c, '。' | '！' | '？' | '．')
+}
+
+/// Sentence-ending punctuation that ends a sentence only before whitespace (`1.5` does not).
+fn is_latin_terminal(c: char) -> bool {
+    matches!(c, '.' | '!' | '?')
+}
+
+/// Closing quotes and brackets, which belong to the sentence they close.
+fn is_closing(c: char) -> bool {
+    matches!(c, '」' | '』' | '）' | ')' | '"' | '\'' | '”' | '’')
+}
+
 /// Whether a line ending with `line` (trailing whitespace removed) ends a sentence: terminal
 /// punctuation, possibly inside closing quotes or brackets, or a Japanese closing quote.
 fn ends_sentence(line: &str) -> bool {
-    let closing = |c: char| matches!(c, '」' | '』' | '）' | ')' | '"' | '\'' | '”' | '’');
-    let core = line.trim_end_matches(closing);
+    let core = line.trim_end_matches(is_closing);
     let japanese_quote = line[core.len()..].contains(['」', '』']);
     japanese_quote
         || core
             .chars()
             .last()
-            .is_some_and(|c| matches!(c, '。' | '！' | '？' | '．' | '.' | '!' | '?'))
+            .is_some_and(|c| is_terminal(c) || is_latin_terminal(c))
+}
+
+/// Ranges within `text[start..end]` split after clause punctuation and at whitespace, the last
+/// one taking `sep_end`.
+fn clauses(text: &str, start: usize, end: usize, sep_end: usize) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    let mut piece_start = start;
+    let mut chars = text[start..end].char_indices().peekable();
+    while let Some((offset, c)) = chars.next() {
+        let at = start + offset;
+        let (piece_end, mut separator_end) = if c.is_whitespace() {
+            (at, at + c.len_utf8())
+        } else if matches!(c, '、' | '，' | ',' | ';' | '；' | ':' | '：') {
+            (at + c.len_utf8(), at + c.len_utf8())
+        } else {
+            continue;
+        };
+        while let Some(&(next, c)) = chars.peek()
+            && c.is_whitespace()
+        {
+            separator_end = start + next + c.len_utf8();
+            chars.next();
+        }
+        if piece_end > piece_start && separator_end < end {
+            out.push((piece_start, piece_end, separator_end));
+            piece_start = separator_end;
+        }
+    }
+    out.push((piece_start, end, sep_end));
+    out
+}
+
+/// `text[start..end]` cut into pieces of equal character counts that fit in `max_tokens`, the
+/// last one taking `sep_end`.
+fn by_characters(
+    text: &str,
+    start: usize,
+    end: usize,
+    sep_end: usize,
+    max_tokens: usize,
+    count_tokens: &dyn Fn(&str) -> usize,
+) -> Vec<(usize, usize, usize)> {
+    let slice = &text[start..end];
+    let chars = slice.chars().count();
+    let tokens = count_tokens(slice).max(1);
+    // A little under the average, as tokens are not spread evenly.
+    let per_piece = (chars * max_tokens * 7 / 8 / tokens).max(1);
+    let mut out = Vec::new();
+    let mut piece_start = start;
+    for (n, (offset, _)) in slice.char_indices().enumerate() {
+        if n > 0 && n % per_piece == 0 {
+            out.push((piece_start, start + offset, start + offset));
+            piece_start = start + offset;
+        }
+    }
+    out.push((piece_start, end, sep_end));
+    out
 }
 
 /// Ranges within `text[start..end]` split at line breaks that follow the end of a sentence, the
@@ -317,9 +416,9 @@ fn sentences(
     let mut sentence_start = start;
     let mut chars = text[start..end].char_indices().peekable();
     while let Some((offset, c)) = chars.next() {
-        let is_terminal = matches!(c, '。' | '！' | '？' | '．');
-        let is_latin_terminal = matches!(c, '.' | '!' | '?')
-            && chars.peek().is_none_or(|&(_, next)| next.is_whitespace());
+        let is_terminal = is_terminal(c);
+        let is_latin_terminal =
+            is_latin_terminal(c) && chars.peek().is_none_or(|&(_, next)| next.is_whitespace());
         let is_newline = at_newlines && c == '\n';
         if !(is_terminal || is_latin_terminal || is_newline) {
             continue;
@@ -328,7 +427,7 @@ fn sentences(
         // Absorb closing quotes and brackets right after the terminator.
         let mut after = sentence_end;
         while let Some(&(o, next)) = chars.peek() {
-            if matches!(next, '」' | '』' | '）' | ')' | '"' | '\'' | '”' | '’') {
+            if is_closing(next) {
                 chars.next();
                 after = start + o + next.len_utf8();
             } else {
@@ -369,8 +468,8 @@ fn trim_end(text: &str, start: usize, end: usize) -> usize {
 ///
 /// The context window `n_ctx` is shared between fixed parts (context, glossary), history,
 /// the chunk, and the output. Of what remains after the fixed parts, a chunk gets at most a sixth
-/// and history a third, so the output always has room for three times the chunk; `document`
-/// caps both further.
+/// and history a third, which leaves the output room for about three times the chunk;
+/// `document` caps both further.
 #[allow(clippy::too_many_arguments)]
 pub fn translate_document(
     backend: &mut dyn TranslationBackend,
@@ -405,6 +504,7 @@ pub fn translate_document(
         on_progress,
         is_cancelled,
         history: Vec::new(),
+        history_costs: Vec::new(),
         history_budget,
         emitted: 0,
         total: TranslateStats {
@@ -452,6 +552,8 @@ struct Translator<'a> {
     on_progress: &'a mut dyn FnMut(Progress),
     is_cancelled: &'a dyn Fn() -> bool,
     history: Vec<HistoryPair>,
+    /// Tokens each history pair takes in a prompt, counted once.
+    history_costs: Vec<usize>,
     history_budget: usize,
     /// Bytes of output so far.
     emitted: usize,
@@ -473,9 +575,14 @@ impl Translator<'_> {
         }
     }
 
-    /// Translates `source` once with the recent history, streaming the output.
-    fn generate(&mut self, source: &str, generation: Generation) -> Result<(String, StopReason)> {
-        let recent = recent_history(&self.history, self.history_budget, self.count_tokens);
+    /// Translates `source` once with the recent history, streaming the output. Returns the
+    /// translation, why it stopped, and the number of tokens generated.
+    fn generate(
+        &mut self,
+        source: &str,
+        generation: Generation,
+    ) -> Result<(String, StopReason, usize)> {
+        let recent = recent_history(&self.history, &self.history_costs, self.history_budget);
         let prompt = Prompt::new(self.options, source).with_history(recent);
         let mut translation = String::new();
         let emitted = &mut self.emitted;
@@ -496,16 +603,18 @@ impl Translator<'_> {
         self.total.generated_tokens += stats.generated_tokens;
         self.total.prompt_duration += stats.prompt_duration;
         self.total.generation_duration += stats.generation_duration;
-        Ok((translation, stats.stop_reason))
+        Ok((translation, stats.stop_reason, stats.generated_tokens))
     }
 
     fn remember(&mut self, source: &str, translation: &str) {
         let translation = translation.trim();
         if !translation.is_empty() {
+            let cost = (self.count_tokens)(source) + (self.count_tokens)(translation) + 16;
             self.history.push(HistoryPair {
                 source: source.to_owned(),
                 translation: translation.to_owned(),
             });
+            self.history_costs.push(cost);
         }
     }
 
@@ -522,10 +631,9 @@ impl Translator<'_> {
         let start = self.emitted;
         let source_tokens = (self.count_tokens)(text);
         let max_tokens = max_output_tokens(source_tokens);
-        let (translation, mut reason) = self.generate(text, Generation::greedy(max_tokens))?;
-        if reason == StopReason::Finished
-            && looks_incomplete(source_tokens, (self.count_tokens)(&translation))
-        {
+        let (translation, mut reason, generated) =
+            self.generate(text, Generation::greedy(max_tokens))?;
+        if reason == StopReason::Finished && looks_incomplete(source_tokens, generated) {
             reason = StopReason::Incomplete;
         }
         if !reason.is_runaway() {
@@ -578,7 +686,7 @@ impl Translator<'_> {
             max_tokens,
             penalize_repetition: true,
         };
-        let (translation, reason) = self.generate(text, generation)?;
+        let (translation, reason, _) = self.generate(text, generation)?;
         match reason {
             StopReason::Finished => {
                 self.remember(text, &translation);
@@ -623,16 +731,16 @@ impl Level {
     }
 }
 
-/// The longest suffix of `history` that fits in `budget` tokens.
+/// The longest suffix of `history` whose `costs` (tokens per pair) fit in `budget`.
 fn recent_history<'h>(
     history: &'h [HistoryPair],
+    costs: &[usize],
     budget: usize,
-    count_tokens: &dyn Fn(&str) -> usize,
 ) -> &'h [HistoryPair] {
     let mut used = 0;
     let mut start = history.len();
-    for (i, pair) in history.iter().enumerate().rev() {
-        used += count_tokens(&pair.source) + count_tokens(&pair.translation) + 16;
+    for (i, cost) in costs.iter().enumerate().rev() {
+        used += cost;
         if used > budget {
             break;
         }
@@ -672,11 +780,11 @@ mod tests {
 
     #[test]
     fn splits_paragraphs_and_keeps_layout() {
-        let text = "  First paragraph here.\n\n\nSecond one.\n  \nThird.";
+        let text = "  First one here.\n\n\nSecond one.\n  \nThird.";
         let s = split(text, 15, &chars);
         assert_eq!(s.leading, "  ");
         let texts: Vec<_> = s.chunks.iter().map(|c| c.text).collect();
-        assert_eq!(texts, ["First paragraph here.", "Second one.", "Third."]);
+        assert_eq!(texts, ["First one here.", "Second one.", "Third."]);
         assert_eq!(rejoin(&s), text);
     }
 
@@ -704,7 +812,7 @@ mod tests {
         assert_eq!(rejoin(&s), text);
 
         let text = "One sentence. Two sentences! Version 1.5 is out? Yes.";
-        let s = split(text, 16, &chars);
+        let s = split(text, 20, &chars);
         let texts: Vec<_> = s.chunks.iter().map(|c| c.text).collect();
         assert_eq!(
             texts,
@@ -718,10 +826,11 @@ mod tests {
         assert_eq!(rejoin(&s), text);
     }
 
-    fn stats(stop_reason: StopReason) -> TranslateStats {
+    /// Stats for a fake generation of `output`, one token per character.
+    fn stats(stop_reason: StopReason, output: &str) -> TranslateStats {
         TranslateStats {
             prompt_tokens: 1,
-            generated_tokens: 1,
+            generated_tokens: output.chars().count(),
             prompt_duration: Duration::ZERO,
             generation_duration: Duration::ZERO,
             stop_reason,
@@ -758,14 +867,15 @@ mod tests {
             self.prompts.push(prompt.render()?);
             if prompt.text.contains("LOOP") && (self.stubborn || !generation.penalize_repetition) {
                 sink("la la la la");
-                return Ok(stats(StopReason::Repetition { kept: 3 }));
+                return Ok(stats(StopReason::Repetition { kept: 3 }, "la la la la"));
             }
             if prompt.text.contains("SHORT") && prompt.text.contains('b') {
                 sink("A");
-                return Ok(stats(StopReason::Finished));
+                return Ok(stats(StopReason::Finished, "A"));
             }
-            sink(&prompt.text.to_uppercase());
-            Ok(stats(StopReason::Finished))
+            let output = prompt.text.to_uppercase();
+            sink(&output);
+            Ok(stats(StopReason::Finished, &output))
         }
     }
 
@@ -963,7 +1073,7 @@ mod tests {
         };
         let history = [pair("aaaa"), pair("bb"), pair("c")];
         // "c" costs 18 and "bb" 20, so a budget of 40 keeps exactly those two.
-        let recent = recent_history(&history, 40, &chars);
+        let recent = recent_history(&history, &[24, 20, 18], 40);
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].source, "bb");
     }
@@ -1011,6 +1121,29 @@ mod tests {
         assert!(ends_sentence("He said \"no.\""));
         assert!(ends_sentence("「待て」"));
         assert!(!ends_sentence("(see above)"));
+    }
+
+    #[test]
+    fn long_sentences_split_at_clauses_and_whitespace() {
+        let text = "これは、とても長い、一文です";
+        let s = split(text, 8, &chars);
+        let texts: Vec<_> = s.chunks.iter().map(|c| c.text).collect();
+        assert_eq!(texts, ["これは、", "とても長い、", "一文です"]);
+        assert_eq!(rejoin(&s), text);
+
+        let text = "one two three four five";
+        let s = split(text, 10, &chars);
+        assert!(s.chunks.iter().all(|c| chars(c.text) <= 10));
+        assert_eq!(rejoin(&s), text);
+    }
+
+    #[test]
+    fn text_without_boundaries_is_cut_to_fit() {
+        let text = "x".repeat(100);
+        let s = split(&text, 30, &chars);
+        assert!(s.chunks.len() >= 4);
+        assert!(s.chunks.iter().all(|c| chars(c.text) <= 30));
+        assert_eq!(rejoin(&s), text);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! requests and drops both when switching models.
 
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use llama_cpp_2::context::LlamaContext;
@@ -28,13 +28,6 @@ use crate::{EngineError, Generation, Result, StopReason, TranslateStats, Transla
 pub struct RuntimeOptions {
     /// Forward llama.cpp logs to `tracing` instead of discarding them.
     pub logs: bool,
-    /// Directory holding ggml backend modules (`dynamic-backends` builds only).
-    ///
-    /// Defaults to the directory of the current executable, which is where a packaged app keeps
-    /// them. Only when nothing loads from there *and* the executable runs from its own cargo
-    /// target directory (`cargo run`) is the build output directory tried as well; a packaged
-    /// app never looks outside its own folder.
-    pub backends_dir: Option<PathBuf>,
 }
 
 /// Process-wide llama.cpp state. Create at most one.
@@ -43,16 +36,22 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    /// Starts llama.cpp.
+    ///
+    /// With `dynamic-backends`, the ggml backend modules are loaded from the directory of the
+    /// current executable, which is where a packaged app keeps them. Only when nothing loads
+    /// from there *and* the executable runs from its own cargo target directory (`cargo run`) is
+    /// the build output directory tried as well; a packaged app never looks outside its own
+    /// folder.
     pub fn init(options: RuntimeOptions) -> Result<Self> {
         llama_cpp_2::send_logs_to_tracing(LogOptions::default().with_logs_enabled(options.logs));
         #[cfg(feature = "dynamic-backends")]
         {
-            let dir = options.backends_dir.or_else(|| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(Path::to_path_buf))
-            });
-            if let Some(dir) = dir {
+            let dir = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(Path::to_path_buf));
+            // llama-cpp-2 panics on a path that is not UTF-8; such a folder loads nothing.
+            if let Some(dir) = dir.filter(|dir| dir.to_str().is_some()) {
                 llama_cpp_2::llama_backend::load_backends_from_path(&dir);
             }
             if llama_cpp_2::list_llama_ggml_backend_devices().is_empty()
@@ -67,8 +66,6 @@ impl Runtime {
                 return Err(EngineError::NoBackends);
             }
         }
-        #[cfg(not(feature = "dynamic-backends"))]
-        let _ = options.backends_dir;
         let backend = LlamaBackend::init()?;
         Ok(Self { backend })
     }
@@ -368,8 +365,7 @@ impl TranslationBackend for Session<'_> {
         } else {
             LlamaSampler::greedy()
         };
-        let input: Vec<i32> = tokens.iter().map(|t| t.0).collect();
-        let mut loops = LoopDetector::for_input(&input);
+        let mut loops = LoopDetector::for_input(tokens.iter().map(|t| t.0).collect());
         let mut utf8 = Utf8Stream::default();
         let mut piece = Vec::new();
         let mut pos = tokens.len();
@@ -383,8 +379,8 @@ impl TranslationBackend for Session<'_> {
             if is_cancelled() {
                 break StopReason::Cancelled;
             }
+            // `sample` also accepts the token into the sampler's history (which DRY reads).
             let token = sampler.sample(&self.ctx, self.batch.n_tokens() - 1);
-            sampler.accept(token);
             if token == tag || vocab.is_eog(token) {
                 break StopReason::Finished;
             }

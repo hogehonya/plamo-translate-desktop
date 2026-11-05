@@ -295,7 +295,10 @@ impl ModelStore {
 
     /// Location of an in-progress download.
     pub fn partial_path(&self, entry: &CatalogEntry) -> PathBuf {
-        self.dir.join(format!("{}.part", entry.file_name))
+        // Named after the expected digest too, so a partial download of an older revision is
+        // never resumed against a newer one.
+        let digest = entry.sha256.get(..12).unwrap_or(entry.sha256);
+        self.dir.join(format!("{}.{digest}.part", entry.file_name))
     }
 
     /// Files only reach their final name after verification, so a final file of the right

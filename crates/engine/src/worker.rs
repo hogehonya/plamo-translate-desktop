@@ -7,6 +7,7 @@
 //! jobs that are already stale are skipped. That keeps auto-translate responsive while the
 //! user types.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,7 +40,8 @@ pub struct ModelInfo {
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    /// llama.cpp could not be initialized. The worker has exited.
+    /// llama.cpp could not be initialized, or the worker failed unexpectedly. The worker has
+    /// exited.
     RuntimeFailed(String),
     /// The compute devices available, sent once after llama.cpp starts.
     Devices(Vec<Device>),
@@ -74,8 +76,9 @@ pub enum Event {
         index: usize,
         reason: StopReason,
     },
-    /// Output for a sentence of chunk `index` kept running away and was cut. `source` is the
-    /// sentence's byte range in the text, and `output` what was kept of its translation.
+    /// Output for a piece of chunk `index` (usually a sentence) kept running away and was cut.
+    /// `source` is the piece's byte range in the text, and `output` what was kept of its
+    /// translation, including the cut marker.
     Cut {
         job: JobId,
         index: usize,
@@ -121,7 +124,21 @@ impl Worker {
         let thread_latest = latest.clone();
         thread::Builder::new()
             .name("inference".into())
-            .spawn(move || run(options, rx, events, thread_latest))
+            .spawn(move || {
+                let report = events.clone();
+                let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    run(options, rx, events, thread_latest)
+                }));
+                // Without this the UI would wait for the dead thread forever.
+                if let Err(payload) = result {
+                    let message = payload
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_owned())
+                        .or_else(|| payload.downcast_ref::<String>().cloned())
+                        .unwrap_or_default();
+                    report(Event::RuntimeFailed(format!("internal error: {message}")));
+                }
+            })
             .expect("failed to spawn the inference thread");
         Self { commands, latest }
     }

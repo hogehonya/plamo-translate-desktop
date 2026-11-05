@@ -15,7 +15,6 @@ use crate::models::{CatalogEntry, SUPPORTED_FAMILIES};
 
 const API: &str = "https://huggingface.co/api/models";
 const AUTHOR: &str = "pfnet";
-const USER_AGENT: &str = concat!("plamo-translate-desktop/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
@@ -41,6 +40,16 @@ pub struct DiscoveredEntry {
 impl DiscoveredEntry {
     /// Converts to a catalog entry. The strings are leaked, which is fine for the handful of
     /// entries an app run registers.
+    /// Whether the fields are what discovery derives from Hugging Face's metadata.
+    fn is_valid(&self) -> bool {
+        parse_repo(&self.repo)
+            .is_some_and(|(family, size)| family == self.family && size == self.size)
+            && parse_file(&self.file_name, &self.family, &self.size).as_deref()
+                == Some(&*self.quant)
+            && is_lower_hex(&self.sha256, 64)
+            && is_lower_hex(&self.revision, 40)
+    }
+
     pub fn into_entry(self) -> CatalogEntry {
         fn leak(s: String) -> &'static str {
             Box::leak(s.into_boxed_str())
@@ -86,7 +95,7 @@ struct LfsInfo {
 pub fn discover() -> Result<Vec<DiscoveredEntry>, DiscoveryError> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(30)))
-        .user_agent(USER_AGENT)
+        .user_agent(crate::USER_AGENT)
         .build()
         .into();
     let models: Vec<ModelSummary> = get_json(
@@ -162,12 +171,22 @@ fn parse_file(path: &str, family: &str, size: &str) -> Option<String> {
     valid.then(|| quant.to_owned())
 }
 
-/// Reads entries saved by [`save_cache`]. A missing or unreadable cache yields nothing.
+/// Reads entries saved by [`save_cache`]. A missing or unreadable cache yields nothing, and
+/// entries that a fresh discovery would not produce are dropped: the file name becomes a path
+/// that is written and deleted.
 pub fn load_cache(path: &Path) -> Vec<DiscoveredEntry> {
-    std::fs::read_to_string(path)
+    let entries: Vec<DiscoveredEntry> = std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    entries
+        .into_iter()
+        .filter(DiscoveredEntry::is_valid)
+        .collect()
+}
+
+fn is_lower_hex(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 pub fn save_cache(path: &Path, entries: &[DiscoveredEntry]) -> std::io::Result<()> {

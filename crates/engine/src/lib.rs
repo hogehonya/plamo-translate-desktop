@@ -42,6 +42,9 @@ pub enum EngineError {
 
 pub type Result<T, E = EngineError> = std::result::Result<T, E>;
 
+/// User agent for requests to Hugging Face.
+pub(crate) const USER_AGENT: &str = concat!("plamo-translate-desktop/", env!("CARGO_PKG_VERSION"));
+
 /// Why generation stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
@@ -103,8 +106,8 @@ pub struct Generation {
     /// Stop with [`StopReason::LengthLimit`] after this many tokens.
     pub max_tokens: usize,
     /// Penalize repeating earlier output (llama.cpp's DRY sampler) instead of decoding purely
-    /// greedily. This also discourages legitimate repetition, so it is only used to retry output
-    /// that looped.
+    /// greedily. This also discourages legitimate repetition, so it is only used for the last
+    /// retry of output that ran away.
     pub penalize_repetition: bool,
 }
 

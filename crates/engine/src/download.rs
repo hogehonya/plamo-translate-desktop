@@ -17,7 +17,6 @@ use thiserror::Error;
 
 use crate::models::{CatalogEntry, ModelStore};
 
-const USER_AGENT: &str = concat!("plamo-translate-desktop/", env!("CARGO_PKG_VERSION"));
 const BUFFER_SIZE: usize = 1 << 20;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -116,7 +115,9 @@ pub fn download(
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(20)))
             .timeout_recv_response(Some(Duration::from_secs(60)))
-            .user_agent(USER_AGENT)
+            // A stalled connection would otherwise block in `read` forever, past cancellation.
+            .timeout_per_read(Some(Duration::from_secs(30)))
+            .user_agent(crate::USER_AGENT)
             .build()
             .into();
         let mut request = agent.get(entry.url());
@@ -136,7 +137,8 @@ pub fn download(
         }
         part.seek(SeekFrom::Start(offset))?;
 
-        let mut reader = response.body_mut().as_reader();
+        // Never write past the expected size, whatever the server sends.
+        let mut reader = response.body_mut().as_reader().take(total - offset);
         let mut buf = vec![0; BUFFER_SIZE];
         let mut downloaded = offset;
         let mut meter = RateMeter::new(downloaded);

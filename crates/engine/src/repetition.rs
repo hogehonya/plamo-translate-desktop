@@ -57,10 +57,11 @@ impl LoopDetector {
 
     /// A detector calibrated to the prompt: a span counts as a loop only if it is well beyond
     /// any repetition the input itself contains, such as a ruler of dashes or a refrain.
-    pub fn for_input(input: &[i32]) -> Self {
+    pub fn for_input(input: Vec<i32>) -> Self {
+        let min_span = MIN_LOOP_SPAN.max(2 * longest_periodic_span(&input));
         Self {
-            input: input.to_vec(),
-            ..Self::new(MIN_LOOP_SPAN.max(2 * longest_periodic_span(input)))
+            input,
+            ..Self::new(min_span)
         }
     }
 
@@ -207,7 +208,7 @@ mod tests {
     fn calibrates_to_repetition_in_the_input() {
         let input: Vec<i32> = (0..100).map(|i| i % 4).collect();
         assert_eq!(longest_periodic_span(&input), 100);
-        let mut d = LoopDetector::for_input(&input);
+        let mut d = LoopDetector::for_input(input.clone());
         // The output may repeat as much as the input does, but not without bound.
         assert_eq!(feed(&mut d, (0..150).map(|i| i % 4)), None);
         assert!(feed(&mut d, (150..300).map(|i| i % 4)).is_some());
@@ -221,14 +222,14 @@ mod tests {
             .chain(line.iter().copied().cycle().take(5 * 30))
             .chain([2])
             .collect();
-        let mut d = LoopDetector::for_input(&input);
+        let mut d = LoopDetector::for_input(input.clone());
         let output = std::iter::once(7).chain(line.iter().copied().cycle().take(5 * 100));
         let found = feed(&mut d, output).unwrap();
         assert_eq!(found.period, 5);
         assert_eq!(d.keep(found), 1 + 5 * 30);
 
         // A cycle the input does not contain keeps its first occurrence only.
-        let mut d = LoopDetector::for_input(&input);
+        let mut d = LoopDetector::for_input(input.clone());
         let found = feed(&mut d, [3, 4, 5, 6].iter().copied().cycle().take(400)).unwrap();
         assert_eq!(d.keep(found), found.first_end());
     }
@@ -236,6 +237,9 @@ mod tests {
     #[test]
     fn plain_input_uses_the_default_threshold() {
         assert_eq!(longest_periodic_span(&[1, 2, 3, 4, 5]), 0);
-        assert_eq!(LoopDetector::for_input(&[1, 2, 3]).min_span, MIN_LOOP_SPAN);
+        assert_eq!(
+            LoopDetector::for_input(vec![1, 2, 3]).min_span,
+            MIN_LOOP_SPAN
+        );
     }
 }

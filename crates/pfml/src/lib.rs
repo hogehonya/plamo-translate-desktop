@@ -57,9 +57,6 @@ impl SpecialToken {
         Self::Item,
     ];
 
-    /// Tokens whose generation ends a translation.
-    pub const STOP: [SpecialToken; 2] = [Self::Tag, Self::Bos];
-
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Bos => "<|plamo:bos|>",
@@ -275,7 +272,7 @@ impl<'a> Prompt<'a> {
             Text("translation"),
         ]);
 
-        if !opts.context.is_empty() {
+        if !opts.context.trim().is_empty() {
             out.extend([
                 Special(Tag),
                 Text("context"),
