@@ -28,6 +28,8 @@
   ]);
   // Inline elements kept as they are: their content is not translated.
   const OPAQUE = new Set(["BR", "CODE", "IMG", "KBD", "SAMP", "VAR", "WBR"]);
+  // Elements in a translation whose content is dropped along with them.
+  const DROP = new Set(["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT", "IFRAME", "OBJECT", "SVG", "MATH"]);
   const KANA = /[\u3040-\u309f\u30a0-\u30ff]/;
   const LETTER = /\p{L}/u;
 
@@ -148,9 +150,11 @@
           into.append(node.data);
         } else if (node.nodeType === Node.ELEMENT_NODE) {
           const i = Number(node.getAttribute("i"));
-          const original = Number.isInteger(i) && !used.has(i) ? elements[i] : undefined;
+          const original = node.hasAttribute("i") && Number.isInteger(i) && !used.has(i) ? elements[i] : undefined;
           if (!original) {
-            build(node, into); // Unknown or repeated: keep only its text.
+            // Not one of the run's elements: never inserted. Its text is kept, except for
+            // elements whose content is not text to show.
+            if (!DROP.has(node.tagName)) build(node, into);
             continue;
           }
           used.add(i);
