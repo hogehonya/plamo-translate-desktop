@@ -40,6 +40,12 @@ fn main() {
         settings::models_dir().display()
     );
     let settings = settings::Settings::load();
+    // Files found on Hugging Face by earlier runs; the Models dialog refreshes this list.
+    let cached = engine::discovery::load_cache(&settings::catalog_cache_path());
+    let added = engine::models::register(cached.into_iter().map(|d| d.into_entry()));
+    if added > 0 {
+        app_log!("catalog: {added} cached entries newer than the built-in list");
+    }
     // Shared with gpui-component, so its built-in strings follow the same locale.
     rust_i18n::set_locale(settings.ui_language.locale());
 

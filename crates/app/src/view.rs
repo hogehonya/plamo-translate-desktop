@@ -217,6 +217,7 @@ impl TranslatorView {
                 store.clone(),
                 catalog::default_entry(),
                 settings.license_accepted,
+                settings::catalog_cache_path(),
                 cx,
             )
         });
@@ -304,7 +305,7 @@ impl TranslatorView {
                     .and_then(catalog::find_entry)
                     .filter(downloaded)
                     .or_else(|| Some(catalog::default_entry()).filter(downloaded))
-                    .or_else(|| catalog::CATALOG.iter().find(downloaded))
+                    .or_else(|| catalog::entries().into_iter().find(downloaded))
                     .map(ModelChoice::Catalog)
             }
         };
@@ -513,19 +514,14 @@ impl TranslatorView {
         let device = backend::resolve(&self.settings.backend.device, devices);
         self.loaded_on = Some(backend::device_label(device));
         crate::app_log!(
-            "loading {} on {} (n_ctx {})",
+            "loading {} on {}",
             path.display(),
-            backend::device_label(device),
-            self.settings.backend.n_ctx
+            backend::device_label(device)
         );
         self.worker.load(LoadRequest {
             path,
             model: backend::model_options(device),
-            session: SessionOptions {
-                n_ctx: self.settings.backend.n_ctx,
-                ..SessionOptions::default()
-            }
-            .with_auto_threads(),
+            session: SessionOptions::default().with_auto_threads(),
         });
     }
 
@@ -576,6 +572,7 @@ impl TranslatorView {
                 self.unload_model(cx);
             }
             ModelsEvent::ReviewLicense => self.open_license(false, window, cx),
+            ModelsEvent::CatalogUpdated => self.update_recommendation(cx),
         }
     }
 
@@ -657,7 +654,7 @@ impl TranslatorView {
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
                 .title(t!("models.title").into_owned())
-                .w(px(800.))
+                .w(px(900.))
                 .child(v_flex().gap_4().child(backend.clone()).child(panel.clone()))
         });
     }

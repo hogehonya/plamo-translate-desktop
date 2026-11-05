@@ -170,7 +170,8 @@ impl SessionOptions {
 impl Default for SessionOptions {
     fn default() -> Self {
         Self {
-            n_ctx: 16384,
+            // The maximum length the model was trained with (input and output together).
+            n_ctx: 32768,
             n_batch: 2048,
             n_threads: None,
             n_threads_batch: None,
@@ -252,9 +253,13 @@ impl Model {
     }
 
     pub fn session(&self, runtime: &Runtime, options: &SessionOptions) -> Result<Session<'_>> {
+        // Each request starts from an empty KV cache and never rewinds, so sliding-window
+        // layers only need the window instead of a full-length cache. For PLaMo 3 (7 of every 8
+        // layers use a 2048-token window) this cuts the cache by about 5x at 32k tokens.
         let mut params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(options.n_ctx))
-            .with_n_batch(options.n_batch.min(options.n_ctx));
+            .with_n_batch(options.n_batch.min(options.n_ctx))
+            .with_swa_full(false);
         if let Some(n) = options.n_threads {
             params = params.with_n_threads(n);
         }

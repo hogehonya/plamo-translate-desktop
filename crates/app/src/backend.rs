@@ -11,9 +11,6 @@ use crate::lang::{self, Choice};
 use crate::models::format_bytes;
 use crate::settings::{BackendSettings, DeviceSetting};
 
-/// Context lengths offered in the UI. The model was trained with up to 32,768 tokens.
-pub const CONTEXT_LENGTHS: [u32; 4] = [4096, 8192, 16384, 32768];
-
 /// The device a setting resolves to on this machine. `None` means the CPU.
 pub fn resolve<'a>(setting: &DeviceSetting, devices: &'a [Device]) -> Option<&'a Device> {
     let best_gpu = || {
@@ -50,10 +47,11 @@ pub fn available_memory(device: Option<&Device>, devices: &[Device]) -> u64 {
     }
 }
 
-/// Rough memory needed to run a model file: weights, compute buffers and the KV cache.
-/// PLaMo 3 uses sliding-window attention on most layers, so the cache stays small.
-pub fn estimate_required(model_bytes: u64, n_ctx: u32) -> u64 {
-    model_bytes + model_bytes / 5 + u64::from(n_ctx) * 32 * 1024 + (256 << 20)
+/// Rough memory needed to run a model file at the full 32k context: weights, the KV cache and
+/// compute buffers. With windowed caches for the sliding-window layers, the KV cache is 5-17%
+/// of the file size across the published models (measured 297 MiB for 2B Q4_K_M).
+pub fn estimate_required(model_bytes: u64) -> u64 {
+    model_bytes + model_bytes / 5 + (384 << 20)
 }
 
 pub fn device_label(device: Option<&Device>) -> String {
@@ -65,7 +63,6 @@ pub enum BackendEvent {
 }
 
 type DeviceSelect = SelectState<Vec<Choice<DeviceSetting>>>;
-type ContextSelect = SelectState<Vec<Choice<u32>>>;
 
 pub struct BackendPanel {
     settings: BackendSettings,
@@ -73,7 +70,6 @@ pub struct BackendPanel {
     /// Size of the active model file, for the memory check.
     model_bytes: Option<u64>,
     device_select: Entity<DeviceSelect>,
-    context_select: Entity<ContextSelect>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -92,37 +88,24 @@ impl BackendPanel {
             )
         });
 
-        let context_choices = context_choices();
-        let selected = lang::position(&context_choices, &settings.n_ctx).map(IndexPath::new);
-        let context_select = cx.new(|cx| SelectState::new(context_choices, selected, window, cx));
-
-        let subscriptions = vec![
-            cx.subscribe_in(&device_select, window, |this, _, event, _, cx| {
-                if let SelectEvent::Confirm(Some(device)) = event
-                    && *device != this.settings.device
-                {
-                    this.settings.device = device.clone();
-                    cx.emit(BackendEvent::Changed(this.settings.clone()));
-                    cx.notify();
-                }
-            }),
-            cx.subscribe_in(&context_select, window, |this, _, event, _, cx| {
-                if let SelectEvent::Confirm(Some(n_ctx)) = event
-                    && *n_ctx != this.settings.n_ctx
-                {
-                    this.settings.n_ctx = *n_ctx;
-                    cx.emit(BackendEvent::Changed(this.settings.clone()));
-                    cx.notify();
-                }
-            }),
-        ];
+        let subscriptions =
+            vec![
+                cx.subscribe_in(&device_select, window, |this, _, event, _, cx| {
+                    if let SelectEvent::Confirm(Some(device)) = event
+                        && *device != this.settings.device
+                    {
+                        this.settings.device = device.clone();
+                        cx.emit(BackendEvent::Changed(this.settings.clone()));
+                        cx.notify();
+                    }
+                }),
+            ];
 
         Self {
             settings,
             devices: Vec::new(),
             model_bytes: None,
             device_select,
-            context_select,
             _subscriptions: subscriptions,
         }
     }
@@ -156,25 +139,12 @@ impl BackendPanel {
     pub fn refresh_locale(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let devices = std::mem::take(&mut self.devices);
         self.set_devices(devices, window, cx);
-        let context_choices = context_choices();
-        let n_ctx = self.settings.n_ctx;
-        self.context_select.update(cx, |state, cx| {
-            state.set_items(context_choices, window, cx);
-            state.set_selected_value(&n_ctx, window, cx);
-        });
     }
 
     pub fn set_model_bytes(&mut self, bytes: Option<u64>, cx: &mut Context<Self>) {
         self.model_bytes = bytes;
         cx.notify();
     }
-}
-
-fn context_choices() -> Vec<Choice<u32>> {
-    CONTEXT_LENGTHS
-        .iter()
-        .map(|&n| Choice::new(n, t!("backend.tokens", count = n).into_owned(), &[]))
-        .collect()
 }
 
 fn device_choices(devices: &[Device]) -> Vec<Choice<DeviceSetting>> {
@@ -209,14 +179,11 @@ fn device_choices(devices: &[Device]) -> Vec<Choice<DeviceSetting>> {
 
 impl Render for BackendPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (muted, warning) = {
-            let theme = cx.theme();
-            (theme.muted_foreground, theme.warning)
-        };
+        let warning = cx.theme().warning;
         let device = resolve(&self.settings.device, &self.devices);
         let available = available_memory(device, &self.devices);
         let memory_warning = self.model_bytes.and_then(|bytes| {
-            let required = estimate_required(bytes, self.settings.n_ctx);
+            let required = estimate_required(bytes);
             (!self.devices.is_empty() && required > available).then(|| {
                 t!(
                     "backend.memory_warning",
@@ -239,18 +206,6 @@ impl Render for BackendPanel {
                         Select::new(&self.device_select)
                             .w(px(420.))
                             .menu_width(px(480.)),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_3()
-                    .child(div().w(px(110.)).child(t!("backend.context").into_owned()))
-                    .child(Select::new(&self.context_select).w(px(180.)))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(t!("backend.context_hint").into_owned()),
                     ),
             )
             .when_some(memory_warning, |this, text| {
@@ -298,9 +253,9 @@ mod tests {
     }
 
     #[test]
-    fn estimate_grows_with_model_and_context() {
-        let small = estimate_required(1 << 30, 4096);
-        assert!(small > 1 << 30);
-        assert!(estimate_required(1 << 30, 32768) > small);
+    fn estimate_covers_weights_and_buffers() {
+        let gib = 1u64 << 30;
+        assert!(estimate_required(gib) > gib + gib / 5);
+        assert!(estimate_required(2 * gib) > estimate_required(gib));
     }
 }

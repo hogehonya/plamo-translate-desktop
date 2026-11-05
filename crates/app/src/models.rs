@@ -1,10 +1,12 @@
 //! The model manager: catalog, downloads and the license gate.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
+use engine::discovery;
 use engine::download::{DownloadEvent, Downloads, Progress};
-use engine::models::{CATALOG, CatalogEntry, LocalState, ModelStore};
+use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::tag::Tag;
@@ -17,6 +19,8 @@ use rust_i18n::t;
 
 const LICENSE_URL_EN: &str = "https://plamo.preferredai.jp/info/plamo-community-license-en";
 const LICENSE_URL_JA: &str = "https://plamo.preferredai.jp/info/plamo-community-license-ja";
+/// Where the quality figures come from.
+const QUALITY_SOURCE_URL: &str = "https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF";
 
 /// The PLaMo Community License in the UI language.
 pub fn license_url() -> &'static str {
@@ -36,6 +40,16 @@ pub enum ModelsEvent {
     DeleteActive(&'static CatalogEntry),
     /// Show the license agreement (downloads stay disabled until it is accepted).
     ReviewLicense,
+    /// Entries were added or updated from Hugging Face.
+    CatalogUpdated,
+}
+
+/// Result of checking Hugging Face for newly published files.
+enum CatalogStatus {
+    Checking,
+    UpToDate,
+    Updated(usize),
+    Failed(String),
 }
 
 pub struct ModelsPanel {
@@ -47,7 +61,10 @@ pub struct ModelsPanel {
     license_accepted: bool,
     /// A download to switch to as soon as it finishes (set when no model is active).
     use_when_done: Option<&'static str>,
+    catalog_status: CatalogStatus,
+    catalog_cache: PathBuf,
     _events: Task<()>,
+    _refresh: Task<()>,
 }
 
 impl EventEmitter<ModelsEvent> for ModelsPanel {}
@@ -57,6 +74,7 @@ impl ModelsPanel {
         store: ModelStore,
         recommended: &'static CatalogEntry,
         license_accepted: bool,
+        catalog_cache: PathBuf,
         cx: &mut Context<Self>,
     ) -> Self {
         let (tx, rx) = async_channel::unbounded();
@@ -73,7 +91,7 @@ impl ModelsPanel {
                 }
             }
         });
-        Self {
+        let mut this = Self {
             downloads,
             progress: HashMap::new(),
             errors: HashMap::new(),
@@ -81,8 +99,52 @@ impl ModelsPanel {
             recommended,
             license_accepted,
             use_when_done: None,
+            catalog_status: CatalogStatus::Checking,
+            catalog_cache,
             _events: events,
-        }
+            _refresh: Task::ready(()),
+        };
+        this.refresh_catalog(cx);
+        this
+    }
+
+    /// Looks for newly published files on Hugging Face in the background.
+    fn refresh_catalog(&mut self, cx: &mut Context<Self>) {
+        self.catalog_status = CatalogStatus::Checking;
+        let cache = self.catalog_cache.clone();
+        self._refresh = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let found = discovery::discover()?;
+                    if let Err(e) = discovery::save_cache(&cache, &found) {
+                        crate::app_log!("cannot save the catalog cache: {e}");
+                    }
+                    Ok::<_, discovery::DiscoveryError>(found)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.catalog_status = match result {
+                    Ok(found) => {
+                        let total = found.len();
+                        let changed = catalog::register(found.into_iter().map(|d| d.into_entry()));
+                        crate::app_log!(
+                            "catalog: {total} files on Hugging Face, {changed} new or updated"
+                        );
+                        if changed > 0 {
+                            cx.emit(ModelsEvent::CatalogUpdated);
+                            CatalogStatus::Updated(changed)
+                        } else {
+                            CatalogStatus::UpToDate
+                        }
+                    }
+                    Err(e) => {
+                        crate::app_log!("catalog check failed: {e}");
+                        CatalogStatus::Failed(e.to_string())
+                    }
+                };
+                cx.notify();
+            });
+        });
     }
 
     pub fn store(&self) -> &ModelStore {
@@ -221,9 +283,14 @@ impl ModelsPanel {
     }
 
     fn render_row(&self, entry: &'static CatalogEntry, cx: &mut Context<Self>) -> AnyElement {
-        let (danger, secondary, muted) = {
+        let (danger, warning, secondary, muted) = {
             let theme = cx.theme();
-            (theme.danger, theme.secondary, theme.muted_foreground)
+            (
+                theme.danger,
+                theme.warning,
+                theme.secondary,
+                theme.muted_foreground,
+            )
         };
         let id = entry.id();
         let state = self.store().state(entry);
@@ -233,14 +300,14 @@ impl ModelsPanel {
         let can_download = self.license_accepted;
 
         let status: AnyElement = if let Some(p) = progress {
-            h_flex()
-                .gap_2()
+            v_flex()
+                .gap_1()
                 .child(
                     ProgressBar::new(SharedString::from(format!("progress-{id}")))
                         .value(p.fraction() * 100.0)
-                        .w(px(120.)),
+                        .w_full(),
                 )
-                .child(progress_text(&p))
+                .child(div().text_xs().child(progress_text(&p)))
                 .into_any_element()
         } else if let Some(error) = &error {
             div()
@@ -357,28 +424,33 @@ impl ModelsPanel {
             .rounded_md()
             .when(is_active, |this| this.bg(secondary))
             .child(
-                h_flex()
-                    .w(px(190.))
-                    .gap_2()
+                v_flex()
+                    .w(px(230.))
+                    .flex_shrink_0()
                     .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(entry.to_string()),
+                        h_flex()
+                            .gap_2()
+                            .child(div().font_weight(FontWeight::MEDIUM).child(entry.quant))
+                            .when(std::ptr::eq(entry, self.recommended), |this| {
+                                this.child(
+                                    Tag::secondary()
+                                        .small()
+                                        .child(t!("models.recommended").into_owned()),
+                                )
+                            }),
                     )
-                    .when(std::ptr::eq(entry, self.recommended), |this| {
-                        this.child(
-                            Tag::secondary()
-                                .small()
-                                .child(t!("models.recommended").into_owned()),
-                        )
+                    .when_some(quant_note(entry.quant), |this, note| {
+                        this.child(div().text_xs().text_color(muted).child(note))
                     }),
             )
             .child(
                 div()
                     .w(px(70.))
+                    .flex_shrink_0()
                     .text_color(muted)
                     .child(format_bytes(entry.bytes)),
             )
+            .child(quality_cell(entry, muted, warning, danger))
             .child(div().flex_1().min_w_0().text_sm().child(status))
             .child(actions)
             .into_any_element()
@@ -387,10 +459,26 @@ impl ModelsPanel {
 
 impl Render for ModelsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows: Vec<_> = CATALOG.iter().map(|e| self.render_row(e, cx)).collect();
-        let (border, muted) = {
+        let (border, muted, divider) = {
             let theme = cx.theme();
-            (theme.warning, theme.muted_foreground)
+            (theme.warning, theme.muted_foreground, theme.border)
+        };
+        // Rows grouped by model size, each group under a header.
+        let mut rows: Vec<AnyElement> = Vec::new();
+        let mut current_base = String::new();
+        for entry in catalog::entries() {
+            let base = entry.base_model();
+            if base != current_base {
+                rows.push(size_header(entry, muted, divider));
+                current_base = base;
+            }
+            rows.push(self.render_row(entry, cx));
+        }
+        let catalog_text = match &self.catalog_status {
+            CatalogStatus::Checking => t!("models.catalog_checking").into_owned(),
+            CatalogStatus::UpToDate => t!("models.catalog_up_to_date").into_owned(),
+            CatalogStatus::Updated(n) => t!("models.catalog_updated", count = n).into_owned(),
+            CatalogStatus::Failed(e) => t!("models.catalog_failed", message = e).into_owned(),
         };
         let license_url = license_url();
         let models_dir = self.store().dir().to_path_buf();
@@ -441,9 +529,23 @@ impl Render for ModelsPanel {
                 }
             })
             .child(
+                h_flex()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(t!("models.quality_legend").into_owned())
+                    .child(
+                        Button::new("quality-source")
+                            .link()
+                            .xsmall()
+                            .label(t!("models.quality_source").into_owned())
+                            .on_click(|_, _, cx| cx.open_url(QUALITY_SOURCE_URL)),
+                    ),
+            )
+            .child(
                 div()
                     .id("model-list")
-                    .max_h(px(420.))
+                    .max_h(px(440.))
                     .overflow_y_scroll()
                     .child(v_flex().gap_0p5().children(rows)),
             )
@@ -464,9 +566,134 @@ impl Render for ModelsPanel {
                                 let _ = std::fs::create_dir_all(&models_dir);
                                 cx.reveal_path(&models_dir);
                             }),
+                    )
+                    .child(div().flex_1())
+                    .child(catalog_text)
+                    .when(
+                        !matches!(self.catalog_status, CatalogStatus::Checking),
+                        |this| {
+                            this.child(
+                                Button::new("refresh-catalog")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t!("models.catalog_refresh").into_owned())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.refresh_catalog(cx);
+                                        cx.notify();
+                                    })),
+                            )
+                        },
                     ),
             )
     }
+}
+
+/// Header above the files of one model size: description and the unquantized quality.
+fn size_header(entry: &CatalogEntry, muted: Hsla, divider: Hsla) -> AnyElement {
+    let description = match entry.size {
+        "0.8b" => t!("models.size_08b"),
+        "2b" => t!("models.size_2b"),
+        "8b" => t!("models.size_8b"),
+        "31b" => t!("models.size_31b"),
+        _ => t!("models.size_other"),
+    };
+    h_flex()
+        .mt_2()
+        .px_2()
+        .pb_1()
+        .gap_3()
+        .border_b_1()
+        .border_color(divider)
+        .child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(entry.size_label()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .text_xs()
+                .text_color(muted)
+                .child(description.into_owned()),
+        )
+        .when_some(entry.reference_quality(), |this, r| {
+            this.child(
+                div().text_xs().text_color(muted).child(
+                    t!(
+                        "models.bf16_reference",
+                        ja = format!("{:.3}", r.pftb),
+                        multi = format!("{:.1}", r.flores_ja)
+                    )
+                    .into_owned(),
+                ),
+            )
+        })
+        .into_any_element()
+}
+
+fn quant_note(quant: &str) -> Option<String> {
+    let key = match quant {
+        "Q4_K_M" => "models.quant_q4km",
+        "Q4_0" => "models.quant_q40",
+        "Q3_K_M" => "models.quant_q3km",
+        "Q2_K" => "models.quant_q2k",
+        "Q8_0" => "models.quant_q80",
+        _ => return None,
+    };
+    Some(t!(key).into_owned())
+}
+
+/// Published quality of a file, with the difference from the unquantized model.
+/// Larger drops are highlighted: thresholds roughly separate "same as BF16" from noticeable loss.
+fn quality_cell(entry: &CatalogEntry, muted: Hsla, warning: Hsla, danger: Hsla) -> AnyElement {
+    let (Some(q), Some(r)) = (entry.quality(), entry.reference_quality()) else {
+        return div()
+            .w(px(170.))
+            .flex_shrink_0()
+            .text_xs()
+            .text_color(muted)
+            .child(t!("models.quality_unknown").into_owned())
+            .into_any_element();
+    };
+    let line = |label: String, value: String, delta: f32, warn: f32, bad: f32, digits: usize| {
+        let color = if delta <= -bad {
+            danger
+        } else if delta <= -warn {
+            warning
+        } else {
+            muted
+        };
+        h_flex()
+            .gap_1()
+            .child(div().text_color(muted).child(label))
+            .child(div().child(value))
+            .child(
+                div()
+                    .text_color(color)
+                    .child(format!("({delta:+.digits$})")),
+            )
+    };
+    v_flex()
+        .w(px(170.))
+        .flex_shrink_0()
+        .text_xs()
+        .child(line(
+            t!("models.metric_ja").into_owned(),
+            format!("{:.3}", q.pftb),
+            q.pftb - r.pftb,
+            0.003,
+            0.008,
+            3,
+        ))
+        .child(line(
+            t!("models.metric_multi").into_owned(),
+            format!("{:.1}", q.flores_ja),
+            q.flores_ja - r.flores_ja,
+            0.3,
+            0.8,
+            1,
+        ))
+        .into_any_element()
 }
 
 fn progress_text(p: &Progress) -> String {

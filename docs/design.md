@@ -168,9 +168,20 @@ The first implementation is `LlamaCppBackend`:
 
 ## 7. Model management
 
-- A built-in catalog (`engine::models::CATALOG`) lists all 14 GGUF files: repo, pinned commit, file name, size, and SHA-256.
-  - The download URL uses the pinned commit, so it always serves the file whose digest we ship.
-  - A new upstream release means updating the catalog.
+- The catalog (`engine::models`) starts with a built-in list (`BUILTIN`) of the 14 GGUF files published at build time.
+  Each entry has its repo, pinned commit, file name, size, and SHA-256, and the download URL uses the pinned commit.
+- Catalog discovery (`engine::discovery`) keeps the app current without a new release:
+  - At start-up it searches Hugging Face for `pfnet/<family>-<size>-GGUF` repositories of supported families (today `plamo-3-translate`).
+  - It pins each repository to its current commit and reads each `<family>-<size>-<quant>.gguf` with its size and SHA-256 from the Git LFS metadata.
+  - New sizes or quantizations are added, and newer revisions of known files replace the old ones.
+  - The result is cached in `catalog.json` next to the models, so offline starts know it. "Check again" in the dialog repeats the search.
+  - A new model generation with a different prompt format still needs an app update, so unknown families are ignored.
+- Quality data (`engine::models::QUALITY`) holds the scores PFN publishes for every file and for the BF16 reference:
+  PFTB, SaaS, WMT24++ COMET-22, and FLORES+ chrF++ (Ja↔ and En↔14 languages).
+  - The dialog groups files by size. Each size has a header with a description and its BF16 scores.
+  - Each file shows Ja↔En (PFTB) and multilingual (FLORES+ Ja↔) scores with the difference from BF16.
+    Drops beyond 0.003 / 0.3 are amber, and beyond 0.008 / 0.8 red.
+  - Files without published figures (discovered later) say so.
 - Download (`engine::download`): `GET https://huggingface.co/<repo>/resolve/<revision>/<file>` into `<file>.part`. It uses `ureq` on its own thread.
   - Hugging Face redirects to a CDN that honours `Range`, so an interrupted or cancelled download resumes from the partial file.
   - The existing part is hashed first, so the digest always covers the whole file.
@@ -211,14 +222,17 @@ The first implementation is `LlamaCppBackend`:
   - `cpu`.
   - A device name such as `Vulkan0`. If that device disappears, the app falls back to `auto`.
 - The model is fully offloaded to the selected GPU. Partial offload (GPU layers) is a possible later setting.
-- The context length is selectable: 4096, 8192, 16384 (the default), or 32768.
+- The context length is fixed at 32768, the maximum the model was trained with, and is not a setting.
+  - The KV cache for sliding-window layers is limited to the window (`swa_full = false`). This is safe because every request starts from an empty cache.
+  - At 32k this needs 0.05 / 0.3 / 0.4 / 1.6 GiB of KV cache for 0.8B / 2B / 8B / 31B. With a full SWA cache it would be 0.26 / 1.5 / 2.0 / 8.2 GiB.
+  - Translation speed does not depend on the context length (measured: 144–148 tok/s for 2B at 4k, 16k, and 32k).
 - CPU threads are set automatically. Prompt processing uses the physical cores, and generation uses at most 8,
   because it is memory-bound.
-- Memory check: the app estimates the file size × 1.2 + 32 KiB per context token + 256 MiB.
+- Memory check: the app estimates the file size × 1.2 + 384 MiB.
   If that exceeds the free memory of the selected device, the dialog shows a warning; the model still loads.
 - The "Recommended" model is the largest Q4_K_M up to 8B that fits the free memory of the selected device
   (system memory for the CPU).
-- Changing the device or the context length reloads the model. The title bar shows the model and the device, for example `2B · Q4_K_M · Vulkan0`.
+- Changing the device reloads the model. The title bar shows the model and the device, for example `2B · Q4_K_M · Vulkan0`.
 
 ## 9. UI
 

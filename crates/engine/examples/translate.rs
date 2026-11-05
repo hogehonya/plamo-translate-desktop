@@ -25,7 +25,7 @@ options:
   --form plain|polite Japanese style (target ja only)
   --context TEXT      reference context
   --glossary SRC=TGT  glossary entry (repeatable)
-  --ctx N             context size in tokens (default: 16384)
+  --ctx N             context size in tokens (default: 32768)
   --threads N         CPU threads
   --gpu INDEX         offload to the ggml device INDEX (see --list-devices)
   --gpu-layers N      number of layers to offload (default: all)

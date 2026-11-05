@@ -3,6 +3,7 @@
 //! ```text
 //! cargo run -p engine --release --example download -- [--dir DIR] [--stop-after-mb N] [MODEL_ID]
 //! cargo run -p engine --release --example download -- --list
+//! cargo run -p engine --release --example download -- --discover
 //! ```
 //!
 //! `--stop-after-mb` cancels once that much has been transferred, to exercise resuming.
@@ -13,13 +14,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, bail};
 use engine::download::{DownloadError, download};
-use engine::models::{CATALOG, ModelStore, default_entry, find_entry};
+use engine::models::{ModelStore, default_entry, entries, find_entry};
 
 fn main() -> anyhow::Result<()> {
     let mut dir = None;
     let mut stop_after = None;
     let mut id = None;
     let mut list = false;
+    let mut discover = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -32,14 +34,39 @@ fn main() -> anyhow::Result<()> {
                 stop_after = Some(mb << 20);
             }
             "--list" => list = true,
+            "--discover" => discover = true,
             s if s.starts_with("--") => bail!("unknown option {s}"),
             _ => id = Some(arg),
         }
     }
 
+    if discover {
+        let found = engine::discovery::discover()?;
+        println!("{} GGUF files on Hugging Face", found.len());
+        for d in &found {
+            let builtin = engine::models::BUILTIN
+                .iter()
+                .find(|b| b.file_name == d.file_name);
+            let note = match builtin {
+                Some(b) if b.sha256 == d.sha256 => "built in",
+                Some(_) => "newer than built in",
+                None => "new",
+            };
+            println!(
+                "{:<40} {:>6.2} GB  {}  {note}",
+                d.file_name,
+                d.bytes as f64 / 1e9,
+                &d.revision[..8]
+            );
+        }
+        let added = engine::models::register(found.into_iter().map(|d| d.into_entry()));
+        println!("registered {added} new or updated entries");
+        return Ok(());
+    }
+
     let store = ModelStore::new(dir.unwrap_or_else(|| PathBuf::from("models")));
     if list {
-        for e in CATALOG {
+        for e in entries() {
             println!(
                 "{:<36} {:>6.2} GB  {:?}",
                 e.id(),

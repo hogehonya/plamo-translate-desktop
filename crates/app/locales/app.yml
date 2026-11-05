@@ -111,15 +111,6 @@ models.title:
 backend.device:
   en: Device
   ja: 実行デバイス
-backend.context:
-  en: Context length
-  ja: コンテキスト長
-backend.context_hint:
-  en: Longer contexts translate longer texts at once but use more memory.
-  ja: 長くすると一度に長文を翻訳できますが、メモリを多く使います。
-backend.tokens:
-  en: "%{count} tokens"
-  ja: "%{count} トークン"
 backend.auto:
   en: "Automatic (%{device})"
   ja: "自動（%{device}）"
@@ -388,3 +379,67 @@ settings.language:
 settings.language_system:
   en: "System (%{lang})"
   ja: "システムに合わせる（%{lang}）"
+
+models.quality_legend:
+  en: "Quality (higher is better): Ja↔En = PFTB, multilingual = FLORES+ chrF++ (Ja↔14 languages). In parentheses: difference from the unquantized model."
+  ja: "品質（高いほど良い）: 日英 = PFTB、多言語 = FLORES+ chrF++（日本語↔14 言語）。カッコ内は量子化なし（BF16）との差。"
+models.quality_source:
+  en: Source (model card)
+  ja: 出典（モデルカード）
+models.quality_unknown:
+  en: No published figures
+  ja: 公表値なし
+models.metric_ja:
+  en: Ja↔En
+  ja: 日英
+models.metric_multi:
+  en: Multilingual
+  ja: 多言語
+models.bf16_reference:
+  en: "Unquantized: Ja↔En %{ja} / multilingual %{multi}"
+  ja: "量子化なし: 日英 %{ja} / 多言語 %{multi}"
+models.size_08b:
+  en: Smallest and fastest. Runs well even without a GPU; quality is a step below 2B.
+  ja: 最小・最速。GPU なしでも軽快に動きます。品質は 2B より一段下です。
+models.size_2b:
+  en: Balanced speed and quality. Practical on a CPU, very fast on a GPU.
+  ja: 速度と品質のバランス型。CPU でも実用的で、GPU ならとても高速です。
+models.size_8b:
+  en: High quality. A GPU with 8 GB or more is recommended.
+  ja: 高品質。8 GB 以上の GPU を推奨します。
+models.size_31b:
+  en: Best quality. Needs about 20 GB of memory at Q4_K_M; slow without a large GPU.
+  ja: 最高品質。Q4_K_M で約 20 GB のメモリが必要で、大容量の GPU がないと低速です。
+models.size_other:
+  en: Newly published size.
+  ja: 新しく公開されたサイズです。
+models.quant_q4km:
+  en: Recommended. Practically the same quality as unquantized.
+  ja: おすすめ。量子化なしとほぼ同等の品質です。
+models.quant_q40:
+  en: Slightly smaller; tuned for phones. Multilingual quality drops a little.
+  ja: やや小さく、スマートフォン向けに最適化。多言語の品質が少し下がります。
+models.quant_q3km:
+  en: Smaller, with a small quality loss.
+  ja: 小さめ。品質はわずかに下がります。
+models.quant_q2k:
+  en: Smallest, with a noticeable quality loss.
+  ja: 最小。品質の低下がはっきり出ます。
+models.quant_q80:
+  en: Larger, nearly lossless.
+  ja: 大きめ。ほぼ劣化なし。
+models.catalog_checking:
+  en: Checking Hugging Face for new models…
+  ja: Hugging Face で新しいモデルを確認中…
+models.catalog_up_to_date:
+  en: The list is up to date.
+  ja: 一覧は最新です。
+models.catalog_updated:
+  en: "Found %{count} new or updated files."
+  ja: "新しいファイルを %{count} 件見つけました。"
+models.catalog_failed:
+  en: "Could not check for new models (%{message}). Showing the known list."
+  ja: "新しいモデルを確認できませんでした（%{message}）。既知の一覧を表示しています。"
+models.catalog_refresh:
+  en: Check again
+  ja: 再確認

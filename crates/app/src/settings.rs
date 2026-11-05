@@ -16,6 +16,14 @@ pub fn models_dir() -> PathBuf {
     )
 }
 
+/// Catalog entries found on Hugging Face, cached for offline starts.
+pub fn catalog_cache_path() -> PathBuf {
+    models_dir().parent().map_or_else(
+        || PathBuf::from("catalog.json"),
+        |dir| dir.join("catalog.json"),
+    )
+}
+
 /// The application log, next to the models.
 pub fn log_path() -> PathBuf {
     models_dir()
@@ -91,15 +99,12 @@ fn supported_locale(requested: &str) -> Option<&'static str> {
 #[serde(default)]
 pub struct BackendSettings {
     pub device: DeviceSetting,
-    /// Context window in tokens.
-    pub n_ctx: u32,
 }
 
 impl Default for BackendSettings {
     fn default() -> Self {
         Self {
             device: DeviceSetting::Auto,
-            n_ctx: 16384,
         }
     }
 }
@@ -160,7 +165,10 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"model":"x","unknown":1}"#).unwrap();
         assert_eq!(s.model.as_deref(), Some("x"));
         assert!(!s.license_accepted);
-        assert_eq!(s.backend.n_ctx, 16384);
+        // Settings from older versions with a context length still load.
+        let s: Settings =
+            serde_json::from_str(r#"{"backend":{"device":{"kind":"cpu"},"n_ctx":4096}}"#).unwrap();
+        assert_eq!(s.backend.device, super::DeviceSetting::Cpu);
         assert_eq!(s.ui_language, super::UiLanguage::System);
         let s: Settings = serde_json::from_str(r#"{"ui_language":"japanese"}"#).unwrap();
         assert_eq!(s.ui_language, super::UiLanguage::Japanese);
