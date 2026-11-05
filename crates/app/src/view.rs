@@ -162,8 +162,11 @@ fn browser_settings(
         .gap_2()
         .pt_2()
         .child(
+            // The label, then the status, the path of another copy, and the buttons stacked
+            // beside it, so the buttons never take the status's width.
             h_flex()
                 .gap_3()
+                .items_start()
                 .text_sm()
                 .child(
                     div()
@@ -171,12 +174,25 @@ fn browser_settings(
                         .flex_none()
                         .child(t!("settings.browser").into_owned()),
                 )
-                .child(div().flex_1().min_w_0().child(status))
-                .children(connect.map(|button| div().flex_none().child(button)))
-                .children(disconnect.map(|button| div().flex_none().child(button)))
-                .children(open_folder.map(|button| div().flex_none().child(button))),
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(div().child(status))
+                        .children(
+                            elsewhere.map(|path| div().text_xs().text_color(muted).child(path)),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .flex_wrap()
+                                .children(connect)
+                                .children(disconnect)
+                                .children(open_folder),
+                        ),
+                ),
         )
-        .children(elsewhere.map(|path| div().text_xs().text_color(muted).min_w_0().child(path)))
         .children(error.map(|e| {
             div()
                 .text_xs()
@@ -672,6 +688,10 @@ impl TranslatorView {
             _events: events,
         };
         this.link_selection_focus(cx);
+        // Development aid (debug builds only): open the settings at start, for screenshots.
+        if cfg!(debug_assertions) && std::env::var_os("PLAMO_DEBUG_OPEN_SETTINGS").is_some() {
+            cx.defer_in(window, |this, window, cx| this.open_settings(window, cx));
+        }
         let needs_model = initial.is_none();
         if let Some(choice) = initial {
             this.load_model(choice, cx);
