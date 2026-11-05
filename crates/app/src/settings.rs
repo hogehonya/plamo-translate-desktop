@@ -89,11 +89,13 @@ impl Default for DocumentSettings {
 }
 
 impl DocumentSettings {
-    pub fn options(self) -> DocumentOptions {
+    /// The options for a translation; `cut_marker` marks passages that were cut.
+    pub fn options(self, cut_marker: String) -> DocumentOptions {
         DocumentOptions {
             // A chunk of a few tokens would only split sentences apart.
             max_chunk_tokens: self.chunk_tokens.max(64),
             max_history_tokens: self.history_tokens,
+            cut_marker,
         }
     }
 }

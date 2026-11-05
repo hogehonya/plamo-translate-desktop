@@ -1048,7 +1048,10 @@ impl TranslatorView {
         options.glossary = self.glossary.clone();
         Request {
             options,
-            document: self.settings.document.options(),
+            document: self
+                .settings
+                .document
+                .options(t!("output.cut_marker").into_owned()),
             text,
         }
     }
@@ -1090,7 +1093,7 @@ impl TranslatorView {
         self.set_translation(String::new(), window, cx);
         self.current_job = Some(self.worker.translate(
             request.options.clone(),
-            request.document,
+            request.document.clone(),
             request.text.clone(),
         ));
         self.stream_tokens = 0;

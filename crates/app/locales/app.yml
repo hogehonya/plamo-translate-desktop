@@ -79,6 +79,9 @@ status.ready:
 status.translating:
   en: "Translating into %{lang}…"
   ja: "%{lang}に翻訳中…"
+output.cut_marker:
+  en: " [translation cut off here: it kept repeating]"
+  ja: "〔繰り返しが止まらなかったため、この文の訳を打ち切りました〕"
 status.tokens:
   en: "%{count} tokens"
   ja: "%{count} トークン"

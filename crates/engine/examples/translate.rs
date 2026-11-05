@@ -204,6 +204,7 @@ fn main() -> anyhow::Result<()> {
     let document = DocumentOptions {
         max_chunk_tokens: args.chunk_tokens.unwrap_or(defaults.max_chunk_tokens),
         max_history_tokens: args.history_tokens.unwrap_or(defaults.max_history_tokens),
+        cut_marker: " [translation cut off: it kept repeating]".into(),
     };
     let streaming = args.output.is_none();
     // Shared by the output and progress callbacks.

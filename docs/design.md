@@ -200,7 +200,10 @@ The first implementation is `LlamaCppBackend`:
        When the prompt contains the same cycle (text copied verbatim, such as repeated lines of code), as many repeats as the prompt has are kept:
        the model tends to copy such text and not stop, and only the repeats beyond the source's are the loop.
   - Output that ran away never enters the history, so one loop cannot seed the next.
-  - The app logs retries and cuts to `app.log` (without text). The status bar reports cuts.
+  - A cut is marked in the translation (`DocumentOptions::cut_marker`, in the UI language), so it shows when the text is copied.
+    The engine emits the marker itself, keeping the output offsets it reports in step with the text.
+  - The app logs retries and cuts to `app.log` (without text, with the source character position of a cut).
+    The status bar reports cuts; clicking it selects the next cut passage in both panes.
 - The worker reports `Chunk { index, count }`, and the status bar shows progress such as `(2/5)`.
 
 ### 6.2 Context and glossary

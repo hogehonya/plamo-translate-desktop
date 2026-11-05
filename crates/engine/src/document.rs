@@ -23,12 +23,15 @@ use pfml::{HistoryPair, Prompt, TranslationOptions};
 use crate::{Generation, Result, StopReason, TranslateStats, TranslationBackend};
 
 /// How a long text is split, and how much history accompanies each chunk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentOptions {
     /// Upper bound for a chunk, in tokens. Chunks are also limited by the context window.
     pub max_chunk_tokens: usize,
     /// Upper bound for the history passed with each chunk, in tokens.
     pub max_history_tokens: usize,
+    /// Text appended where output was cut ([`Progress::Cut`]), so the gap shows in the
+    /// translation. Empty for none.
+    pub cut_marker: String,
 }
 
 impl Default for DocumentOptions {
@@ -36,6 +39,7 @@ impl Default for DocumentOptions {
         Self {
             max_chunk_tokens: 1024,
             max_history_tokens: 4096,
+            cut_marker: String::new(),
         }
     }
 }
@@ -393,6 +397,7 @@ pub fn translate_document(
     let split = split(text, chunk_budget, count_tokens);
     let mut translator = Translator {
         text,
+        cut_marker: &document.cut_marker,
         backend,
         count_tokens,
         options,
@@ -439,6 +444,7 @@ pub fn translate_document(
 struct Translator<'a> {
     /// The whole text; every piece translated is a slice of it.
     text: &'a str,
+    cut_marker: &'a str,
     backend: &'a mut dyn TranslationBackend,
     count_tokens: &'a dyn Fn(&str) -> usize,
     options: &'a TranslationOptions,
@@ -585,6 +591,7 @@ impl Translator<'_> {
             // Incomplete.)
             StopReason::LengthLimit | StopReason::Incomplete => {}
         }
+        self.emit(self.cut_marker);
         self.total.cut += 1;
         let source_start = text.as_ptr() as usize - self.text.as_ptr() as usize;
         (self.on_progress)(Progress::Cut {
@@ -799,6 +806,7 @@ mod tests {
         let document = DocumentOptions {
             max_chunk_tokens: 200,
             max_history_tokens: 500,
+            ..DocumentOptions::default()
         };
         let text = "\nalpha beta gamma.\n\ndelta epsilon zeta.\n";
         let words = |s: &str| s.split_whitespace().count() * 60;
@@ -832,6 +840,7 @@ mod tests {
         let document = DocumentOptions {
             max_chunk_tokens: 25,
             max_history_tokens: 1000,
+            ..DocumentOptions::default()
         };
         let text = "Good one. Bad LOOP one.\n\nNext.";
         let (out, stats, progress) = run(&mut backend, &chars, document, text);
@@ -901,6 +910,27 @@ mod tests {
     }
 
     #[test]
+    fn marks_where_output_was_cut() {
+        let mut backend = Upper {
+            prompts: vec![],
+            stubborn: true,
+        };
+        let document = DocumentOptions {
+            max_chunk_tokens: 6,
+            max_history_tokens: 1000,
+            cut_marker: "[CUT]".into(),
+        };
+        let (out, _, progress) = run(&mut backend, &chars, document, "LOOP.\n\nNext.");
+        assert_eq!(out, "la [CUT]\n\nNEXT.");
+        // The reported output range covers the marker.
+        assert!(
+            progress
+                .iter()
+                .any(|p| matches!(p, Progress::Cut { output: (0, 8), .. }))
+        );
+    }
+
+    #[test]
     fn cuts_output_that_keeps_looping() {
         let mut backend = Upper {
             prompts: vec![],
@@ -910,6 +940,7 @@ mod tests {
         let document = DocumentOptions {
             max_chunk_tokens: 6,
             max_history_tokens: 1000,
+            ..DocumentOptions::default()
         };
         let (out, stats, progress) = run(&mut backend, &chars, document, "LOOP.\n\nNext.");
         // The single sentence goes straight to the penalized retry, and its first cycle is kept.
