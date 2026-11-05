@@ -74,7 +74,8 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
 3. Select text on a page, right-click, and choose **Translate with PLaMo**: the side panel shows the translation as it streams in.
    The toolbar button opens the panel to type or paste text.
 
-The browser starts the host while the panel is open. It uses the model and device selected in the app, but loads its own copy,
+The browser starts the host while the panel is open. It uses the model and device selected in the app unless you choose others
+under **Model and device** in the panel (any downloaded model; downloads stay in the app). It loads its own copy of the model,
 so with the app open as well the model is in memory twice. If you move the app's folder, choose Connect again.
 Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
 

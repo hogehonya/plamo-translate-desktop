@@ -453,11 +453,16 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 - The extension's ID (`bcagbgackmnblhlofmpcmjfkfhhogpmh`) follows from the public key in its manifest, so the unpacked extension always has it.
   A Chrome Web Store release would get another ID, which must be added to `EXTENSION_IDS`.
 - Protocol (`crates/host/src/protocol.rs`): length-prefixed JSON both ways.
-  - Requests: `translate { id, text, target (code or auto), source, style }`, `cancel`, `status`.
-  - Responses: `status` (starting, loading, ready, no_model, error), `started`, `progress`, `text`, `rewind` (a UTF-16 length, as JavaScript counts),
+  - Requests: `translate { id, text, target (code or auto), source, style }`, `cancel`, `status`, `options`,
+    and `configure { model, device }` (the extension's own choices; absent fields follow the app).
+  - Responses: `status` (starting, loading, ready, no_model, error), `options` (downloaded models, devices, and the current choices),
+    `started`, `progress`, `text`, `rewind` (a UTF-16 length, as JavaScript counts),
     `done { tokens, cut, stopped }`, and `error` with a code the extension localizes.
   - The host reads the app's settings before each request and reloads when the model or device changed.
     It uses the app's glossary, chunk and history sizes, and cut marker.
+  - The panel's model and device choices are kept by the extension and sent in `configure` when it connects;
+    the host loads nothing before the first request, so the app's model is not loaded only to be replaced.
+    Writing them into the app's settings would have been undone by the app's next save.
   - A new request supersedes the running one, as in the app; the superseded one ends with `done { stopped }`.
 - Limits:
   - The host loads its own copy of the model, so with the app open the model is in memory twice. Relaying to a running app would avoid that.

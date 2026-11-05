@@ -11,6 +11,8 @@ const $ = (id) => document.getElementById(id);
 const t = (key, ...args) => chrome.i18n.getMessage(key, args) || key;
 
 let port = null;
+// The model and device chosen here ("" follows the app); sent whenever the host starts.
+let choices = { model: "", device: "" };
 let nextId = 1;
 let currentId = null;
 let outputNode = document.createTextNode("");
@@ -38,6 +40,18 @@ $("target").addEventListener("change", () => {
 });
 $("style").addEventListener("change", () => chrome.storage.local.set({ style: $("style").value }));
 
+for (const id of ["model", "device"]) {
+  $(id).addEventListener("change", () => {
+    choices[id] = $(id).value;
+    chrome.storage.local.set({ choices });
+    configure();
+  });
+}
+
+function configure() {
+  send({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+}
+
 function updateStyleVisibility() {
   // Style applies to Japanese only; "auto" may translate into Japanese.
   const target = $("target").value;
@@ -63,10 +77,16 @@ $("copy").addEventListener("click", async () => {
   setTimeout(() => ($("copy").textContent = t("copy")), 1200);
 });
 
+// The saved choices are needed before the host is first contacted.
+const ready = chrome.storage.local.get({ choices }).then((saved) => {
+  choices = { ...choices, ...saved.choices };
+});
+
 // Text selected in a page arrives through session storage (see background.js).
-chrome.storage.session.get("request").then(({ request }) => request && takeRequest(request));
+chrome.storage.session.get("request").then(({ request }) => request && ready.then(() => takeRequest(request)));
 chrome.storage.session.onChanged.addListener((changes) => {
-  if (changes.request?.newValue) takeRequest(changes.request.newValue);
+  const request = changes.request?.newValue;
+  if (request) ready.then(() => takeRequest(request));
 });
 
 function takeRequest(request) {
@@ -80,6 +100,8 @@ function takeRequest(request) {
 function connect() {
   port = chrome.runtime.connectNative(HOST);
   port.onMessage.addListener(onMessage);
+  // The host loads a model only after this, so the app's model is not loaded in vain.
+  port.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
   port.onDisconnect.addListener(() => {
     const error = chrome.runtime.lastError?.message ?? "";
     port = null;
@@ -117,6 +139,9 @@ function onMessage(message) {
     case "status":
       status = message;
       renderStatus();
+      break;
+    case "options":
+      renderOptions(message);
       break;
     case "started":
       if (message.id === currentId) $("progress").textContent = t("translatingInto", t(`lang_${message.target.replace("-", "_")}`));
@@ -171,6 +196,24 @@ function errorText(message) {
 
 // ---- Rendering ----
 
+function renderOptions(options) {
+  const gb = (bytes) => `${(bytes / 1e9).toFixed(2)} GB`;
+  const model = $("model");
+  model.replaceChildren(new Option(t("followApp", options.app_model ?? t("none")), ""));
+  for (const m of options.models) model.add(new Option(`${m.label} (${gb(m.bytes)})`, m.id));
+  model.value = options.model ?? "";
+
+  const deviceName = (setting) => (setting === "auto" ? t("deviceAuto") : setting === "cpu" ? "CPU" : setting);
+  const device = $("device");
+  device.replaceChildren(
+    new Option(t("followApp", deviceName(options.app_device)), ""),
+    new Option(t("deviceAuto"), "auto"),
+    new Option("CPU", "cpu"),
+  );
+  for (const d of options.devices) device.add(new Option(`${d.name} — ${d.description}`, d.name));
+  device.value = options.device ?? "";
+}
+
 function renderStatus() {
   if (!status) return;
   const model = [status.model?.replace(/^plamo-3-translate-/, ""), status.device].filter(Boolean).join(" · ");
@@ -211,5 +254,5 @@ function hideNotice() {
   $("notice").hidden = true;
 }
 
-// Connect right away to show the model's state.
-send({ type: "status" });
+// Connect right away, with the saved choices, to show the model's state and the options.
+ready.then(() => send({ type: "options" }));

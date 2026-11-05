@@ -20,12 +20,12 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use appdata::settings::{self, DeviceSetting, Settings};
 use appdata::{app_log, applog, devices, glossary};
 use engine::StopReason;
-use engine::llama::{Device, Runtime, RuntimeOptions, SessionOptions};
-use engine::models::{self as catalog, ModelStore};
+use engine::llama::{Device, DeviceKind, Runtime, RuntimeOptions, SessionOptions};
+use engine::models::{self as catalog, LocalState, ModelStore};
 use engine::pfml::{Form, LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
 
-use crate::protocol::{Request, Response, read_message, write_message};
+use crate::protocol::{DeviceChoice, ModelChoice, Request, Response, read_message, write_message};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -42,9 +42,9 @@ fn main() {
     let cached = engine::discovery::load_cache(&settings::catalog_cache_path());
     catalog::register(cached.into_iter().map(|d| d.into_entry()));
 
-    // Reports the model's state, starting to load it if one is selected.
+    // The model loads on the first request: the extension sends its choices (`configure`)
+    // first, so the app's selection is not loaded only to be replaced.
     let mut host = Host::start();
-    host.refresh_model();
 
     let mut input = io::stdin().lock();
     loop {
@@ -103,6 +103,9 @@ struct Shared {
     job: Option<(JobId, u64)>,
     /// The translation sent so far, to convert rewinds into UTF-16 lengths.
     output: String,
+    /// Loads sent to the worker whose result has not arrived; only the last one's result
+    /// describes the model in use.
+    pending_loads: usize,
 }
 
 type Output = Arc<Mutex<Stdout>>;
@@ -130,6 +133,9 @@ struct Host {
     /// The model file and device setting last sent to the worker (`Some(None)`: no model), or
     /// `None` before the first check.
     loaded: Option<Option<(PathBuf, DeviceSetting)>>,
+    /// The extension's choices; `None` follows the app.
+    model_choice: Option<String>,
+    device_choice: Option<DeviceSetting>,
 }
 
 impl Host {
@@ -148,6 +154,7 @@ impl Host {
                 },
                 job: None,
                 output: String::new(),
+                pending_loads: 0,
             }),
             Condvar::new(),
         ));
@@ -162,6 +169,8 @@ impl Host {
             shared,
             out,
             loaded: None,
+            model_choice: None,
+            device_choice: None,
         };
         {
             let (lock, ready) = &*host.shared;
@@ -205,14 +214,81 @@ impl Host {
                 self.refresh_model();
                 self.send_status();
             }
+            Request::Options => {
+                let settings = self.refresh_model();
+                self.send_options(&settings);
+            }
+            Request::Configure { model, device } => {
+                self.model_choice = model.filter(|m| !m.is_empty());
+                self.device_choice = device.filter(|d| !d.is_empty()).map(|d| match d.as_str() {
+                    "auto" => DeviceSetting::Auto,
+                    "cpu" => DeviceSetting::Cpu,
+                    _ => DeviceSetting::Device(d),
+                });
+                let before = self.loaded.clone();
+                let settings = self.refresh_model();
+                // An unchanged selection sends no status of its own.
+                if self.loaded == before {
+                    self.send_status();
+                }
+                self.send_options(&settings);
+            }
         }
+    }
+
+    fn send_options(&self, settings: &Settings) {
+        let store = ModelStore::new(settings::models_dir());
+        let models = catalog::entries()
+            .into_iter()
+            .filter(|entry| store.state(entry) == LocalState::Downloaded)
+            .map(|entry| ModelChoice {
+                id: entry.id().to_owned(),
+                label: entry.to_string(),
+                bytes: entry.bytes,
+            })
+            .collect();
+        let devices = self
+            .lock()
+            .devices
+            .iter()
+            .flatten()
+            .filter(|d| d.kind != DeviceKind::Cpu)
+            .map(|d| DeviceChoice {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                kind: match d.kind {
+                    DeviceKind::Gpu => "gpu",
+                    DeviceKind::IntegratedGpu => "integrated_gpu",
+                    _ => "other",
+                },
+                memory_free: d.memory_free,
+            })
+            .collect();
+        self.send(&Response::Options {
+            models,
+            devices,
+            app_model: settings
+                .model
+                .as_deref()
+                .and_then(catalog::find_entry)
+                .map(|entry| entry.to_string()),
+            app_device: device_setting_name(&settings.backend.device),
+            model: self.model_choice.clone(),
+            device: self.device_choice.as_ref().map(device_setting_name),
+        });
     }
 
     /// Loads the model selected in the app's settings, unless it is already loaded. Returns the
     /// settings.
     fn refresh_model(&mut self) -> Settings {
         let settings = Settings::load();
-        let wanted = model_path(&settings).map(|path| (path, settings.backend.device.clone()));
+        let selected = self.selected_model(&settings);
+        let device = self
+            .device_choice
+            .clone()
+            .unwrap_or_else(|| settings.backend.device.clone());
+        let model = selected.as_ref().map(|(_, label)| label.clone());
+        let wanted = selected.map(|(path, _)| (path, device));
         if self.loaded.as_ref() == Some(&wanted) {
             return settings;
         }
@@ -221,12 +297,6 @@ impl Host {
             let shared = self.lock();
             (shared.devices.clone(), shared.runtime_error.clone())
         };
-        let model = wanted.as_ref().map(|(path, _)| {
-            path.file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
-        });
         if let Some(error) = runtime_error {
             self.set_status(Status {
                 state: "error",
@@ -264,6 +334,7 @@ impl Host {
             device: Some(device_label),
             message: None,
         });
+        self.lock().pending_loads += 1;
         self.worker.load(LoadRequest {
             path,
             model: devices::model_options(device),
@@ -348,13 +419,37 @@ impl Host {
     }
 }
 
-/// The model file to use: `PLAMO_MODEL` (for development), else the app's selection.
-fn model_path(settings: &Settings) -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("PLAMO_MODEL") {
-        return Some(PathBuf::from(path));
+impl Host {
+    /// The model file to use and its label: `PLAMO_MODEL` (for development), else the
+    /// extension's choice while it is downloaded, else the app's selection.
+    fn selected_model(&self, settings: &Settings) -> Option<(PathBuf, String)> {
+        if let Some(path) = std::env::var_os("PLAMO_MODEL") {
+            let path = PathBuf::from(path);
+            let label = path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            return Some((path, label));
+        }
+        let store = ModelStore::new(settings::models_dir());
+        let chosen = self
+            .model_choice
+            .as_deref()
+            .and_then(catalog::find_entry)
+            .filter(|entry| store.state(entry) == LocalState::Downloaded);
+        let entry = chosen.or_else(|| catalog::find_entry(settings.model.as_deref()?))?;
+        Some((store.path(entry), entry.to_string()))
     }
-    let entry = catalog::find_entry(settings.model.as_deref()?)?;
-    Some(ModelStore::new(settings::models_dir()).path(entry))
+}
+
+/// A device setting as the protocol names it: `auto`, `cpu`, or the device name.
+fn device_setting_name(setting: &DeviceSetting) -> String {
+    match setting {
+        DeviceSetting::Auto => "auto".into(),
+        DeviceSetting::Cpu => "cpu".into(),
+        DeviceSetting::Device(name) => name.clone(),
+    }
 }
 
 fn translation_options(
@@ -411,13 +506,19 @@ fn on_event(shared: &(Mutex<Shared>, Condvar), out: &Output, event: Event) {
             s.devices = Some(devices);
             ready.notify_all();
         }
+        Event::Loaded(_) | Event::LoadFailed(_) if s.pending_loads > 1 => {
+            // A newer load follows.
+            s.pending_loads -= 1;
+        }
         Event::Loaded(_) => {
+            s.pending_loads = 0;
             app_log!("model loaded");
             s.status.state = "ready";
             s.status.message = None;
             send(out, &status_message(&s.status));
         }
         Event::LoadFailed(error) => {
+            s.pending_loads = 0;
             app_log!("loading the model failed: {error}");
             s.status.state = "error";
             s.status.message = Some(error);

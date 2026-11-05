@@ -34,6 +34,12 @@ h1 { font-size: 15px; margin: 0; flex: 1; }
 .status { font-size: 12px; color: var(--muted); text-align: right; }
 .status.error { color: var(--error); }
 .controls { display: flex; gap: 6px; }
+details { font-size: 13px; }
+summary { cursor: pointer; color: var(--muted); }
+details label { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+details label span { width: 5em; flex: none; }
+details select { flex: 1; min-width: 0; }
+.hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .controls select { flex: 1; min-width: 0; }
 select, button, textarea {
   font: inherit;

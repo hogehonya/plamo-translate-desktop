@@ -148,5 +148,31 @@
   },
   "lang_id": {
     "message": "Indonesian"
+  },
+  "settings": {
+    "message": "Model and device"
+  },
+  "model": {
+    "message": "Model"
+  },
+  "device": {
+    "message": "Device"
+  },
+  "followApp": {
+    "message": "Same as the app ($WHAT$)",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
+  },
+  "deviceAuto": {
+    "message": "Automatic"
+  },
+  "none": {
+    "message": "none"
+  },
+  "settingsHint": {
+    "message": "Downloaded models are listed; download others in PLaMo Translate Desktop. Changing these does not change the app's own selection."
   }
 }

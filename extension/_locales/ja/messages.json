@@ -148,5 +148,31 @@
   },
   "lang_id": {
     "message": "インドネシア語"
+  },
+  "settings": {
+    "message": "モデルとデバイス"
+  },
+  "model": {
+    "message": "モデル"
+  },
+  "device": {
+    "message": "デバイス"
+  },
+  "followApp": {
+    "message": "アプリと同じ（$WHAT$）",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
+  },
+  "deviceAuto": {
+    "message": "自動"
+  },
+  "none": {
+    "message": "未選択"
+  },
+  "settingsHint": {
+    "message": "ダウンロード済みのモデルから選べます。ほかのモデルは PLaMo Translate Desktop でダウンロードしてください。ここで変えても、アプリ側の選択は変わりません。"
   }
 }

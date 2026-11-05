@@ -31,6 +31,36 @@ pub enum Request {
     Cancel,
     /// Report the model and its state.
     Status,
+    /// List the downloaded models and the compute devices.
+    Options,
+    /// Use this model (a catalog id) and device (`auto`, `cpu`, or a device name) instead of the
+    /// app's selection; absent fields follow the app.
+    Configure {
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        device: Option<String>,
+    },
+}
+
+/// A downloaded model the extension can choose.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub id: String,
+    /// Such as `2B · Q4_K_M`.
+    pub label: String,
+    pub bytes: u64,
+}
+
+/// A compute device the extension can choose.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct DeviceChoice {
+    /// Such as `Vulkan0`.
+    pub name: String,
+    pub description: String,
+    /// `gpu`, `integrated_gpu`, or `other`.
+    pub kind: &'static str,
+    pub memory_free: u64,
 }
 
 /// A message to the extension.
@@ -40,10 +70,23 @@ pub enum Response {
     Status {
         /// `starting`, `loading`, `ready`, `no_model`, or `error`.
         state: &'static str,
+        /// The model in use, such as `2B · Q4_K_M`.
         model: Option<String>,
+        /// The device in use, such as `Vulkan0` or `CPU`.
         device: Option<String>,
         message: Option<String>,
         version: &'static str,
+    },
+    /// What `configure` can choose from, and the current choices.
+    Options {
+        models: Vec<ModelChoice>,
+        devices: Vec<DeviceChoice>,
+        /// The app's selection (a label) and device setting (`auto`, `cpu`, or a name).
+        app_model: Option<String>,
+        app_device: String,
+        /// The extension's choices, if any (as in `configure`).
+        model: Option<String>,
+        device: Option<String>,
     },
     /// Translation `id` started into `target`.
     Started { id: u64, target: String },
@@ -139,5 +182,14 @@ mod tests {
         );
         let cancel: Request = serde_json::from_str(r#"{"type":"cancel"}"#).unwrap();
         assert_eq!(cancel, Request::Cancel);
+        let configure: Request =
+            serde_json::from_str(r#"{"type":"configure","device":"cpu"}"#).unwrap();
+        assert_eq!(
+            configure,
+            Request::Configure {
+                model: None,
+                device: Some("cpu".into()),
+            }
+        );
     }
 }
