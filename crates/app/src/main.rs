@@ -58,6 +58,8 @@ fn main() {
                 cx,
             ))),
             window_min_size: Some(size(px(640.), px(400.))),
+            // Matches the desktop entry name on Linux, so the window gets its icon.
+            app_id: Some("plamo-translate-desktop".into()),
             ..TitleBar::window_options()
         };
         gpui_kit::open_window(options, cx, |window, cx| {

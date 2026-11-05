@@ -7,6 +7,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 publish = false
+license = "MIT OR Apache-2.0"
+authors = ["Hideyuki Tanaka"]
+repository = "https://github.com/tanakh/plamo-translate-desktop"
 
 [workspace.dependencies]
 pfml = { path = "crates/pfml" }

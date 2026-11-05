@@ -281,6 +281,11 @@ the auto-translate flag, the window geometry, and the license acceptance record.
   - Linux: a tar.gz (an AppImage comes later).
 - Windows-specific behaviour (DirectX rendering, IME, Vulkan performance on real hardware) is checked by running CI artifacts on the Windows host.
   Once the app is feature-complete, the repo is also built and run locally on Windows.
+- Icon: a white block "p" on a blue rounded tile, after the PLaMo logo. `scripts/gen_icons.py` produces `assets/icon/`
+  (SVG, PNGs from 16 to 512 px, and a multi-size `.ico`) using only the Python standard library.
+  On Windows, `crates/app/build.rs` embeds the icon as resource ID 1, which GPUI loads for its windows.
+  On Linux, the window `app_id` is `plamo-translate-desktop`, to match a desktop entry (M5).
+- Attribution: "Built with PLaMo" appears in the status bar, the Models dialog, and the README (PLaMo Community License, Article 4).
 - Linux build dependencies: `libxkbcommon-x11-dev libwayland-dev libfontconfig-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1`, plus a Vulkan driver and CMake.
   CJK text needs a CJK font at runtime (for example `fonts-noto-cjk`). A minimal WSL image ships none.
 

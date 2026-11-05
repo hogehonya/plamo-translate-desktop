@@ -320,6 +320,11 @@ impl Render for ModelsPanel {
                     .rounded_md()
                     .border_1()
                     .border_color(border)
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Built with PLaMo"),
+                    )
                     .child(t!("models.license_notice").into_owned())
                     .child(
                         h_flex()

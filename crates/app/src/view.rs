@@ -868,7 +868,9 @@ impl Render for TranslatorView {
             .border_color(theme.border)
             .text_xs()
             .text_color(theme.muted_foreground)
-            .child(self.status_text());
+            .child(div().flex_1().min_w_0().child(self.status_text()))
+            // Attribution required by the PLaMo Community License (Article 4).
+            .child("Built with PLaMo");
 
         v_flex()
             .key_context(KEY_CONTEXT)
