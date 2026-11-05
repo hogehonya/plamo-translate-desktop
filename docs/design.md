@@ -262,6 +262,9 @@ The first implementation is `LlamaCppBackend`:
   - Swapping exchanges explicit languages and moves the translation into the source pane.
 - The title bar is drawn by the app (gpui-kit `TitleBar`) on every platform.
   Wayland compositors such as WSLg and GNOME do not draw server-side decorations.
+  - The title bar holds only the title. On Linux, a press on the title bar arms a window move, and any pointer motion before release
+    hands the pointer to the compositor, so buttons there can lose clicks.
+  - The Models button (model and device, or "Choose a model…" in primary style when none is loaded) and the Settings gear sit at the right end of the status bar.
 - Translation options:
   - Style (plain or polite) is shown only for a Japanese target.
   - Context is a separate textarea.

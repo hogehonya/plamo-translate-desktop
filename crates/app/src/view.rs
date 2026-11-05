@@ -1019,42 +1019,43 @@ impl Render for TranslatorView {
         let muted = theme.muted_foreground;
 
         let model_button_label = self.active_model.as_ref().map_or_else(
-            || t!("models.none").into_owned(),
+            || t!("models.choose").into_owned(),
             |model| match &self.loaded_on {
                 Some(device) => format!("{} · {device}", model.label()),
                 None => model.label(),
             },
         );
-        let title_bar = TitleBar::new()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .child(t!("app.title").into_owned()),
-                    )
-                    .child(
-                        Button::new("models")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::HardDrive)
-                            .label(model_button_label)
-                            .tooltip(t!("models.title").into_owned())
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_models(window, cx)),
-                            ),
-                    ),
-            )
-            .child(
-                Button::new("settings")
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Settings)
-                    .tooltip(t!("settings.title").into_owned())
-                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
-            );
+        // Only the title lives in the title bar: on Linux its drag-to-move handling can swallow
+        // clicks on controls placed there, so buttons go in the toolbar and status bar.
+        let title_bar = TitleBar::new().child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .child(t!("app.title").into_owned()),
+        );
+        let model_button = Button::new("models")
+            .xsmall()
+            .icon(IconName::HardDrive)
+            .label(model_button_label)
+            .tooltip(t!("models.title").into_owned())
+            .map(|button| {
+                // Without a model, make the way to choose one stand out.
+                if self.active_model.is_none() {
+                    button.primary()
+                } else {
+                    button.ghost()
+                }
+            })
+            .on_click(cx.listener(|this, _, window, cx| {
+                crate::app_log!("Models button clicked");
+                this.open_models(window, cx)
+            }));
+        let settings_button = Button::new("settings")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Settings)
+            .tooltip(t!("settings.title").into_owned())
+            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)));
 
         let toolbar = h_flex()
             .px_3()
@@ -1191,7 +1192,10 @@ impl Render for TranslatorView {
             .border_color(theme.border)
             .text_xs()
             .text_color(theme.muted_foreground)
+            .gap_2()
             .child(div().flex_1().min_w_0().child(self.status_text()))
+            .child(model_button)
+            .child(settings_button)
             // Attribution required by the PLaMo Community License (Article 4).
             .child("Built with PLaMo");
 

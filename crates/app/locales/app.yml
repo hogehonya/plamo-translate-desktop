@@ -98,11 +98,11 @@ status.model_missing:
   en: "Model file not found: %{path}"
   ja: "モデルファイルが見つかりません: %{path}"
 status.no_model:
-  en: No model selected. Download one from Models.
-  ja: モデルが選択されていません。「モデル」からダウンロードしてください。
+  en: No model selected.
+  ja: モデルが選択されていません。
 status.unloaded:
-  en: Model unloaded. Choose one from Models to translate again.
-  ja: モデルをアンロードしました。翻訳するには「モデル」から選んでください。
+  en: Model unloaded.
+  ja: モデルをアンロードしました。
 
 models.title:
   en: Models and device
@@ -121,9 +121,9 @@ backend.memory_warning:
   en: "This model may not fit on %{device}: it needs about %{required}, and %{available} is free."
   ja: "このモデルは %{device} に収まらない可能性があります（必要量 約 %{required}、空き %{available}）。"
 
-models.none:
-  en: No model
-  ja: モデル未選択
+models.choose:
+  en: Choose a model…
+  ja: モデルを選択…
 models.license_name:
   en: PLaMo Community License
   ja: PLaMo コミュニティライセンス
