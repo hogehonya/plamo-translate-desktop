@@ -125,7 +125,15 @@ jobs:
               Sort-Object { $_.FullName.Length } | Select-Object -First 1
             if ($found) { Copy-Item $found.FullName $dist }
           }
-          Copy-Item "$($out.FullName)\backends\*.dll" $dist
+          # Backend modules: Vulkan, plus a subset of the CPU variants. ggml loads the best one the
+          # CPU supports. Measured on a Ryzen 9 9950X (2B Q4_K_M): AVX2 and AVX-512 generate at the
+          # same speed (memory-bound) and AVX-512 processes prompts ~25% faster; x64 is the slow
+          # last resort. sse42/sandybridge (pre-AVX2 CPUs) and cannonlake/cascadelake (covered by
+          # skylakex/icelake) are left out.
+          Copy-Item "$($out.FullName)\backends\ggml-vulkan.dll" $dist
+          foreach ($variant in 'x64', 'haswell', 'skylakex', 'icelake', 'alderlake') {
+            Copy-Item "$($out.FullName)\backends\ggml-cpu-$variant.dll" $dist
+          }
           foreach ($dll in 'llama.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll') {
             if (-not (Test-Path (Join-Path $dist $dll))) { throw "$dll is missing from the package" }
           }

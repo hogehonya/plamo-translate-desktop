@@ -306,8 +306,16 @@ the auto-translate flag, the window geometry, and the license acceptance record.
 - CI runs on every push and pull request (Windows and Linux) and runs build, tests, clippy, and rustfmt.
 - Build configurations:
   - Windows: features `engine/vulkan` and `engine/dynamic-backends`. llama.cpp is built as DLLs
-    (`llama.dll`, `ggml*.dll`), and the backend modules (CPU variants and Vulkan) sit next to the exe.
-    A machine without a working Vulkan driver simply does not list a Vulkan device.
+    (`llama.dll`, `ggml*.dll`), and the backend modules sit next to the exe.
+    - A machine without a working Vulkan driver simply does not list a Vulkan device.
+    - Five CPU variants are shipped: `x64`, `haswell` (AVX2), `skylakex` and `icelake` (AVX-512), and `alderlake` (AVX-VNNI).
+      ggml loads the best one the CPU supports.
+    - Measured on a Ryzen 9 9950X with 2B Q4_K_M: generation is memory-bound (about 19.5 tok/s for every variant from AVX2 up).
+      AVX-512 processes prompts about 25% faster than AVX2, and `x64` is roughly 25× slower at prompts.
+    - A `zen4` variant (AVX-512 BF16, which MSVC cannot build) would add nothing for quantized models.
+  - Modules are loaded only from the executable's folder.
+    - The build output directory is searched only when the executable runs from that cargo target directory (`cargo run`).
+    - If nothing loads, start-up fails instead of letting `llama_backend_init` search ggml's default paths, which include the current directory.
   - Linux: llama.cpp is linked statically and runs on the CPU only for now. With `dynamic-backends` on Linux,
     llama-cpp-sys-2 copies the versioned `.so` symlinks without their targets, so the libraries need custom packaging.
     That packaging is deferred to M5, and Linux users who want a GPU build it themselves with `--features engine/vulkan`.
