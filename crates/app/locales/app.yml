@@ -97,6 +97,9 @@ status.model_missing:
 status.no_model:
   en: No model selected. Download one from Models.
   ja: モデルが選択されていません。「モデル」からダウンロードしてください。
+status.unloaded:
+  en: Model unloaded. Choose one from Models to translate again.
+  ja: モデルをアンロードしました。翻訳するには「モデル」から選んでください。
 
 models.title:
   en: Models and device
@@ -169,6 +172,15 @@ models.use:
 models.delete:
   en: Delete
   ja: 削除
+models.unload:
+  en: Unload
+  ja: アンロード
+models.delete_title:
+  en: Delete this model?
+  ja: このモデルを削除しますか？
+models.delete_body:
+  en: "%{model} (%{size}) will be removed from this computer. You can download it again later."
+  ja: "%{model}（%{size}）をこのコンピューターから削除します。後で再ダウンロードできます。"
 models.folder:
   en: "Models folder: %{path}"
   ja: "保存先: %{path}"

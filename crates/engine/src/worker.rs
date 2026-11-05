@@ -46,6 +46,8 @@ pub enum Event {
     LoadProgress(f32),
     Loaded(ModelInfo),
     LoadFailed(String),
+    /// The model was released after an unload request; its file is no longer open.
+    Unloaded,
     /// A long text was split; chunk `index` of `count` is starting.
     Chunk {
         job: JobId,
@@ -151,11 +153,15 @@ fn run(
         match command {
             Command::Load(request) => {
                 if let Some(model) = load(&runtime, &request, &events) {
-                    // Serve requests until the next load; the model drops at the end of this arm.
+                    // Serve requests until the next load or unload.
                     next = serve(&runtime, &model, &request, &commands, &events, &latest);
+                    drop(model);
+                    if next.is_none() {
+                        events(Event::Unloaded);
+                    }
                 }
             }
-            Command::Unload => {}
+            Command::Unload => events(Event::Unloaded),
             Command::Translate { job, .. } => events(Event::Failed {
                 job,
                 error: "no model is loaded".into(),

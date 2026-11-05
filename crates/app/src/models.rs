@@ -5,11 +5,13 @@ use std::time::Duration;
 
 use engine::download::{DownloadEvent, Downloads, Progress};
 use engine::models::{CATALOG, CatalogEntry, LocalState, ModelStore};
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
@@ -20,6 +22,10 @@ pub const LICENSE_URL_JA: &str = "https://plamo.preferredai.jp/info/plamo-commun
 pub enum ModelsEvent {
     /// The user picked a downloaded model, or the download they started first finished.
     Use(&'static CatalogEntry),
+    /// Release the active model.
+    Unload,
+    /// Delete the active model. The owner unloads it first, then calls [`ModelsPanel::delete`].
+    DeleteActive(&'static CatalogEntry),
     LicenseAccepted,
 }
 
@@ -139,7 +145,44 @@ impl ModelsPanel {
         cx.notify();
     }
 
-    fn delete(&mut self, entry: &'static CatalogEntry, cx: &mut Context<Self>) {
+    fn confirm_delete(
+        &mut self,
+        entry: &'static CatalogEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let panel = panel.clone();
+            alert
+                .title(t!("models.delete_title").into_owned())
+                .description(
+                    t!(
+                        "models.delete_body",
+                        model = entry.to_string(),
+                        size = format_bytes(entry.bytes)
+                    )
+                    .into_owned(),
+                )
+                .show_cancel(true)
+                .ok_text(t!("models.delete").into_owned())
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text(t!("models.cancel").into_owned())
+                .on_ok(move |_, _, cx| {
+                    let _ = panel.update(cx, |this, cx| {
+                        if this.active == Some(entry.id()) {
+                            cx.emit(ModelsEvent::DeleteActive(entry));
+                        } else {
+                            this.delete(entry, cx);
+                        }
+                    });
+                    true
+                })
+        });
+    }
+
+    /// Deletes the files of a model that is not loaded.
+    pub fn delete(&mut self, entry: &'static CatalogEntry, cx: &mut Context<Self>) {
         if let Err(e) = self.store().delete(entry) {
             self.errors.insert(entry.id(), e.to_string());
         } else {
@@ -208,24 +251,33 @@ impl ModelsPanel {
             } else {
                 match state {
                     LocalState::Downloaded => this
-                        .when(!is_active, |this| {
-                            this.child(
-                                button("use")
-                                    .primary()
-                                    .label(t!("models.use").into_owned())
-                                    .on_click(cx.listener(move |_, _, _, cx| {
-                                        cx.emit(ModelsEvent::Use(entry))
-                                    })),
-                            )
+                        .map(|this| {
+                            if is_active {
+                                this.child(
+                                    button("unload")
+                                        .label(t!("models.unload").into_owned())
+                                        .on_click(
+                                            cx.listener(|_, _, _, cx| cx.emit(ModelsEvent::Unload)),
+                                        ),
+                                )
+                            } else {
+                                this.child(
+                                    button("use")
+                                        .primary()
+                                        .label(t!("models.use").into_owned())
+                                        .on_click(cx.listener(move |_, _, _, cx| {
+                                            cx.emit(ModelsEvent::Use(entry))
+                                        })),
+                                )
+                            }
                         })
                         .child(
                             button("delete")
                                 .ghost()
                                 .label(t!("models.delete").into_owned())
-                                .disabled(is_active)
-                                .on_click(
-                                    cx.listener(move |this, _, _, cx| this.delete(entry, cx)),
-                                ),
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.confirm_delete(entry, window, cx)
+                                })),
                         ),
                     LocalState::Partial(_) => this
                         .child(
@@ -239,9 +291,9 @@ impl ModelsPanel {
                             button("delete")
                                 .ghost()
                                 .label(t!("models.delete").into_owned())
-                                .on_click(
-                                    cx.listener(move |this, _, _, cx| this.delete(entry, cx)),
-                                ),
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.confirm_delete(entry, window, cx)
+                                })),
                         ),
                     LocalState::Missing => this.child(
                         button("download")

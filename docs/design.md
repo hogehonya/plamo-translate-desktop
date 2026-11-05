@@ -185,7 +185,9 @@ The first implementation is `LlamaCppBackend`:
   - Not downloaded: Download.
   - Downloading: a progress bar and Cancel.
   - Paused: Resume and Delete.
-  - Downloaded: Use and Delete. The active model cannot be deleted.
+  - Downloaded: Use (Unload for the active model) and Delete.
+  - Deleting asks for confirmation.
+  - Deleting the active model unloads it first. The file is removed after the worker reports `Unloaded`, because Windows cannot delete a memory-mapped file.
   - Downloads stay disabled until the user accepts the PLaMo Community License. The acceptance is saved in settings.
 - Startup picks the first available of: the saved selection if downloaded, 2B Q4_K_M if downloaded, any downloaded model.
   With no model, the Models dialog opens and the first finished download becomes active automatically.
@@ -301,7 +303,13 @@ the auto-translate flag, the window geometry, and the license acceptance record.
 - **M2 — model management**: catalog, download (progress, resume, verify, delete), and first-run onboarding.
 - **M3 — backend selection**: device list, GPU layers, `n_ctx`, threads, and the memory estimate.
 - **M4 — translation options**: style, context, glossary, and long text with history.
-- **M5 — distribution**: release workflow, icon, settings polish, and the local Windows build check.
+- **M5 — distribution**:
+  - Release workflow.
+  - Icon (done).
+  - Third-party license notices for Lucide icons (ISC/MIT), llama.cpp (MIT), GPUI (Apache-2.0), and the other Rust crates.
+  - Linux desktop entry.
+  - Settings polish.
+  - The local Windows build check.
 
 ## 13. Risks
 

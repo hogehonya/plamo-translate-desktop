@@ -82,6 +82,7 @@ impl ModelChoice {
 
 enum Status {
     NoModel,
+    Unloaded,
     Loading(f32),
     Ready,
     Translating {
@@ -120,6 +121,8 @@ pub struct TranslatorView {
     devices: Option<Vec<Device>>,
     /// Device label of the loaded (or loading) model.
     loaded_on: Option<String>,
+    /// A model to delete once the worker confirms it released the file.
+    pending_delete: Option<&'static CatalogEntry>,
     settings: Settings,
     active_model: Option<ModelChoice>,
     model_ready: bool,
@@ -291,6 +294,7 @@ impl TranslatorView {
             backend,
             devices: None,
             loaded_on: None,
+            pending_delete: None,
             settings,
             active_model: None,
             model_ready: false,
@@ -327,6 +331,23 @@ impl TranslatorView {
         }
         self.active_model = Some(choice);
         self.start_load(cx);
+    }
+
+    /// Releases the active model. The saved selection stays, so the next start loads it again.
+    fn unload_model(&mut self, cx: &mut Context<Self>) {
+        self.worker.unload();
+        self.active_model = None;
+        self.model_ready = false;
+        self.current_job = None;
+        self.shown = None;
+        self.loaded_on = None;
+        self.cache.clear();
+        self.status = Status::Unloaded;
+        self.models
+            .update(cx, |models, cx| models.set_active(None, cx));
+        self.backend
+            .update(cx, |backend, cx| backend.set_model_bytes(None, cx));
+        cx.notify();
     }
 
     /// (Re)loads the active model with the current backend settings. Before llama.cpp has
@@ -412,6 +433,13 @@ impl TranslatorView {
                 if window.has_active_dialog(cx) {
                     window.close_dialog(cx);
                 }
+            }
+            ModelsEvent::Unload => self.unload_model(cx),
+            ModelsEvent::DeleteActive(entry) => {
+                // The file stays open until the worker drops the model (and cannot be deleted
+                // on Windows before that), so delete it when `Event::Unloaded` arrives.
+                self.pending_delete = Some(entry);
+                self.unload_model(cx);
             }
             ModelsEvent::LicenseAccepted => {
                 self.settings.license_accepted = true;
@@ -566,6 +594,16 @@ impl TranslatorView {
                 }
             }
             Event::LoadProgress(p) => self.status = Status::Loading(p),
+            Event::Unloaded => {
+                if let Some(entry) = self.pending_delete.take() {
+                    self.models
+                        .update(cx, |models, cx| models.delete(entry, cx));
+                    if self.settings.model.as_deref() == Some(entry.id()) {
+                        self.settings.model = None;
+                        self.settings.save();
+                    }
+                }
+            }
             Event::Loaded(_) => {
                 self.model_ready = true;
                 self.status = Status::Ready;
@@ -681,6 +719,7 @@ impl TranslatorView {
     fn status_text(&self) -> String {
         match &self.status {
             Status::NoModel => t!("status.no_model").into_owned(),
+            Status::Unloaded => t!("status.unloaded").into_owned(),
             Status::Loading(p) => {
                 t!("status.loading", percent = format!("{:.0}", p * 100.0)).into_owned()
             }

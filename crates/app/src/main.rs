@@ -5,6 +5,7 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod assets;
 mod backend;
 mod glossary;
 mod lang;
@@ -48,25 +49,27 @@ fn main() {
     // Shared with gpui-component, so its built-in strings follow the same locale.
     rust_i18n::set_locale(ui_locale());
 
-    gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
-        view::bind_keys(cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(1100.), px(720.)),
-                cx,
-            ))),
-            window_min_size: Some(size(px(640.), px(400.))),
-            // Matches the desktop entry name on Linux, so the window gets its icon.
-            app_id: Some("plamo-translate-desktop".into()),
-            ..TitleBar::window_options()
-        };
-        gpui_kit::open_window(options, cx, |window, cx| {
-            Theme::sync_system_appearance(Some(window), cx);
-            cx.new(|cx| TranslatorView::new(custom_model, settings, window, cx))
-        })
-        .expect("failed to open the main window");
-        cx.activate(true);
-    });
+    gpui_kit::application()
+        .with_assets(assets::AppAssets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            view::bind_keys(cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(1100.), px(720.)),
+                    cx,
+                ))),
+                window_min_size: Some(size(px(640.), px(400.))),
+                // Matches the desktop entry name on Linux, so the window gets its icon.
+                app_id: Some("plamo-translate-desktop".into()),
+                ..TitleBar::window_options()
+            };
+            gpui_kit::open_window(options, cx, |window, cx| {
+                Theme::sync_system_appearance(Some(window), cx);
+                cx.new(|cx| TranslatorView::new(custom_model, settings, window, cx))
+            })
+            .expect("failed to open the main window");
+            cx.activate(true);
+        });
 }
