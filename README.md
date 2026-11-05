@@ -73,7 +73,7 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
    and select the `browser-extension` folder (**Open extension folder** in the same Settings section).
 3. Select text on a page, right-click, and choose **Translate with PLaMo**: the side panel shows the translation as it streams in.
    The toolbar button opens the panel to type or paste text.
-4. To translate a whole page, right-click it and choose **Translate this page with PLaMo** (or **Translate page** in the panel).
+4. To translate a whole page, right-click it and choose **Translate this page with PLaMo** (or **Translate this page** in the panel).
    Paragraphs are translated in place, keeping links and formatting: those in view first, and when you scroll, the ones you scrolled to.
    A box at the bottom right shows the progress and can stop, resume, or restore the page. Translating another page stops this one,
    which can be resumed later.

@@ -185,7 +185,7 @@
     "message": "Translate this page with PLaMo"
   },
   "translatePage": {
-    "message": "Translate page"
+    "message": "Translate this page"
   },
   "translatePageTitle": {
     "message": "Translate the page in the current tab. Right-clicking the page and choosing \"Translate this page with PLaMo\" also works."

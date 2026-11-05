@@ -59,6 +59,15 @@ button { white-space: nowrap; }
 button { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }
 button.small { padding: 1px 6px; font-size: 12px; }
+/* Translating the page is the panel's other main action, so it stands out under the controls. */
+button.page-button {
+  width: 100%;
+  padding: 6px 8px;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+button.page-button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { background: var(--error); border-color: var(--error); color: #fff; }
 textarea { width: 100%; padding: 8px; resize: vertical; max-height: 50vh; }

@@ -185,7 +185,7 @@
     "message": "このページを PLaMo で翻訳"
   },
   "translatePage": {
-    "message": "ページを翻訳"
+    "message": "このページを翻訳"
   },
   "translatePageTitle": {
     "message": "今のタブのページを翻訳します。ページを右クリックして「このページを PLaMo で翻訳」を選んでも同じです。"
