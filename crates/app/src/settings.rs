@@ -27,6 +27,36 @@ pub struct Settings {
     pub model: Option<String>,
     /// Whether the user accepted the PLaMo Community License before downloading.
     pub license_accepted: bool,
+    pub backend: BackendSettings,
+}
+
+/// Where and how the model runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BackendSettings {
+    pub device: DeviceSetting,
+    /// Context window in tokens.
+    pub n_ctx: u32,
+}
+
+impl Default for BackendSettings {
+    fn default() -> Self {
+        Self {
+            device: DeviceSetting::Auto,
+            n_ctx: 16384,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "name")]
+pub enum DeviceSetting {
+    /// The discrete GPU with the most free memory, else the CPU.
+    #[default]
+    Auto,
+    Cpu,
+    /// A ggml device by name, such as `Vulkan0`.
+    Device(String),
 }
 
 impl Settings {
@@ -74,5 +104,19 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"model":"x","unknown":1}"#).unwrap();
         assert_eq!(s.model.as_deref(), Some("x"));
         assert!(!s.license_accepted);
+        assert_eq!(s.backend.n_ctx, 16384);
+    }
+
+    #[test]
+    fn device_setting_round_trips() {
+        use super::DeviceSetting;
+        for d in [
+            DeviceSetting::Auto,
+            DeviceSetting::Cpu,
+            DeviceSetting::Device("Vulkan0".into()),
+        ] {
+            let json = serde_json::to_string(&d).unwrap();
+            assert_eq!(serde_json::from_str::<DeviceSetting>(&json).unwrap(), d);
+        }
     }
 }

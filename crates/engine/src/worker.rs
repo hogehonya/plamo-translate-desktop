@@ -17,7 +17,7 @@ use pfml::{Prompt, TranslationOptions};
 
 use crate::TranslateStats;
 use crate::TranslationBackend as _;
-use crate::llama::{Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
+use crate::llama::{Device, Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
 
 /// Identifies a translation job. Ids increase monotonically per worker.
 pub type JobId = u64;
@@ -41,6 +41,8 @@ pub struct ModelInfo {
 pub enum Event {
     /// llama.cpp could not be initialized. The worker has exited.
     RuntimeFailed(String),
+    /// The compute devices available, sent once after llama.cpp starts.
+    Devices(Vec<Device>),
     LoadProgress(f32),
     Loaded(ModelInfo),
     LoadFailed(String),
@@ -133,6 +135,7 @@ fn run(
             return;
         }
     };
+    events(Event::Devices(runtime.devices()));
 
     let mut next = None;
     loop {

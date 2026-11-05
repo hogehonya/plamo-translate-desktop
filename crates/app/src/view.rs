@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use engine::StopReason;
-use engine::llama::{ModelOptions, RuntimeOptions, SessionOptions};
+use engine::llama::{Device, RuntimeOptions, SessionOptions};
 use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use engine::pfml::{LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
@@ -23,6 +23,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::backend::{self, BackendEvent, BackendPanel};
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
 use crate::settings::{self, Settings};
@@ -102,6 +103,11 @@ pub struct TranslatorView {
 
     worker: Worker,
     models: Entity<ModelsPanel>,
+    backend: Entity<BackendPanel>,
+    /// Compute devices, once llama.cpp has started.
+    devices: Option<Vec<Device>>,
+    /// Device label of the loaded (or loading) model.
+    loaded_on: Option<String>,
     settings: Settings,
     active_model: Option<ModelChoice>,
     model_ready: bool,
@@ -158,6 +164,7 @@ impl TranslatorView {
             cx.new(|cx| SelectState::new(choices, selected, window, cx))
         };
 
+        let backend = cx.new(|cx| BackendPanel::new(settings.backend.clone(), window, cx));
         let store = ModelStore::new(settings::models_dir());
         let models = cx.new(|cx| {
             ModelsPanel::new(
@@ -171,6 +178,7 @@ impl TranslatorView {
         let subscriptions = vec![
             cx.subscribe_in(&source, window, Self::on_source_event),
             cx.subscribe_in(&models, window, Self::on_models_event),
+            cx.subscribe_in(&backend, window, Self::on_backend_event),
             cx.subscribe_in(&source_select, window, |this, _, event, window, cx| {
                 if let SelectEvent::Confirm(Some(choice)) = event {
                     this.source_choice = *choice;
@@ -237,6 +245,9 @@ impl TranslatorView {
             auto_translate: true,
             worker,
             models,
+            backend,
+            devices: None,
+            loaded_on: None,
             settings,
             active_model: None,
             model_ready: false,
@@ -259,29 +270,8 @@ impl TranslatorView {
         this
     }
 
+    /// Makes `choice` the active model and loads it.
     fn load_model(&mut self, choice: ModelChoice, cx: &mut Context<Self>) {
-        let path = match &choice {
-            ModelChoice::Catalog(entry) => self.models.read(cx).store().path(entry),
-            ModelChoice::Custom(path) => path.clone(),
-        };
-        self.current_job = None;
-        self.shown = None;
-        self.model_ready = false;
-        // Cached results belong to the previous model.
-        self.cache.clear();
-        if path.is_file() {
-            self.worker.load(LoadRequest {
-                path,
-                model: ModelOptions::default(),
-                session: SessionOptions::default(),
-            });
-            self.status = Status::Loading(0.0);
-        } else {
-            self.worker.unload();
-            self.status = Status::Error(
-                t!("status.model_missing", path = path.display().to_string()).into_owned(),
-            );
-        }
         let entry = match &choice {
             ModelChoice::Catalog(entry) => Some(*entry),
             ModelChoice::Custom(_) => None,
@@ -293,7 +283,77 @@ impl TranslatorView {
             self.settings.save();
         }
         self.active_model = Some(choice);
+        self.start_load(cx);
+    }
+
+    /// (Re)loads the active model with the current backend settings. Before llama.cpp has
+    /// reported its devices this only marks the model as loading; the devices event retries.
+    fn start_load(&mut self, cx: &mut Context<Self>) {
+        let Some(choice) = self.active_model.clone() else {
+            return;
+        };
+        self.current_job = None;
+        self.shown = None;
+        self.model_ready = false;
+        // Cached results belong to the previous model or settings.
+        self.cache.clear();
+        self.status = Status::Loading(0.0);
         cx.notify();
+
+        let path = match &choice {
+            ModelChoice::Catalog(entry) => self.models.read(cx).store().path(entry),
+            ModelChoice::Custom(path) => path.clone(),
+        };
+        if !path.is_file() {
+            self.worker.unload();
+            self.loaded_on = None;
+            self.status = Status::Error(
+                t!("status.model_missing", path = path.display().to_string()).into_owned(),
+            );
+            return;
+        }
+        let bytes = std::fs::metadata(&path).ok().map(|m| m.len());
+        self.backend
+            .update(cx, |backend, cx| backend.set_model_bytes(bytes, cx));
+        let Some(devices) = &self.devices else {
+            return;
+        };
+        let device = backend::resolve(&self.settings.backend.device, devices);
+        self.loaded_on = Some(backend::device_label(device));
+        self.worker.load(LoadRequest {
+            path,
+            model: backend::model_options(device),
+            session: SessionOptions {
+                n_ctx: self.settings.backend.n_ctx,
+                ..SessionOptions::default()
+            }
+            .with_auto_threads(),
+        });
+    }
+
+    /// Updates the recommended model for the memory of the selected device.
+    fn update_recommendation(&mut self, cx: &mut Context<Self>) {
+        let Some(devices) = &self.devices else {
+            return;
+        };
+        let device = backend::resolve(&self.settings.backend.device, devices);
+        let recommended = catalog::recommend(backend::available_memory(device, devices));
+        self.models
+            .update(cx, |models, cx| models.set_recommended(recommended, cx));
+    }
+
+    fn on_backend_event(
+        &mut self,
+        _: &Entity<BackendPanel>,
+        event: &BackendEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let BackendEvent::Changed(backend) = event;
+        self.settings.backend = backend.clone();
+        self.settings.save();
+        self.update_recommendation(cx);
+        self.start_load(cx);
     }
 
     fn on_models_event(
@@ -319,11 +379,12 @@ impl TranslatorView {
 
     fn open_models(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = self.models.clone();
+        let backend = self.backend.clone();
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
                 .title(t!("models.title").into_owned())
-                .w(px(780.))
-                .child(panel.clone())
+                .w(px(800.))
+                .child(v_flex().gap_4().child(backend.clone()).child(panel.clone()))
         });
     }
 
@@ -438,6 +499,16 @@ impl TranslatorView {
     fn on_worker_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
         let is_current = |job| self.current_job == Some(job);
         match event {
+            Event::Devices(devices) => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.set_devices(devices.clone(), window, cx)
+                });
+                self.devices = Some(devices);
+                self.update_recommendation(cx);
+                if !self.model_ready && self.active_model.is_some() {
+                    self.start_load(cx);
+                }
+            }
             Event::LoadProgress(p) => self.status = Status::Loading(p),
             Event::Loaded(_) => {
                 self.model_ready = true;
@@ -571,10 +642,13 @@ impl Render for TranslatorView {
         let view = cx.entity().downgrade();
         let theme = cx.theme();
 
-        let model_button_label = self
-            .active_model
-            .as_ref()
-            .map_or_else(|| t!("models.none").into_owned(), ModelChoice::label);
+        let model_button_label = self.active_model.as_ref().map_or_else(
+            || t!("models.none").into_owned(),
+            |model| match &self.loaded_on {
+                Some(device) => format!("{} · {device}", model.label()),
+                None => model.label(),
+            },
+        );
         let title_bar = TitleBar::new().child(
             h_flex()
                 .gap_2()

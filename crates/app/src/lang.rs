@@ -89,7 +89,7 @@ pub struct Choice<V> {
 }
 
 impl<V> Choice<V> {
-    fn new(value: V, title: String, extra_keywords: &[&str]) -> Self {
+    pub fn new(value: V, title: String, extra_keywords: &[&str]) -> Self {
         let mut keywords = title.to_lowercase();
         for k in extra_keywords {
             keywords.push('\n');

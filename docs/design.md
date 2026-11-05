@@ -179,13 +179,24 @@ The first implementation is `LlamaCppBackend`:
 
 ## 8. Backend selection
 
-- The device list comes from ggml, for example:
+- After llama.cpp starts, the worker reports the device list from ggml, for example:
   - `CPU`
   - `Vulkan0 — AMD Radeon RX 9070 XT (16 GB)`
   - `Vulkan1 — AMD Radeon(TM) Graphics`
-- Advanced settings: GPU layers, context length, and CPU threads.
-- Before loading, the app estimates memory (file size plus an estimated KV cache) and warns if it exceeds the device's free memory.
-- When the model or backend changes, the worker unloads and reloads, and the UI shows load progress.
+- The first model load waits for this list.
+- The device setting is saved as one of three values:
+  - `auto` (the default) picks the discrete GPU with the most free memory, or the CPU if there is none. Integrated GPUs are never picked automatically.
+  - `cpu`.
+  - A device name such as `Vulkan0`. If that device disappears, the app falls back to `auto`.
+- The model is fully offloaded to the selected GPU. Partial offload (GPU layers) is a possible later setting.
+- The context length is selectable: 4096, 8192, 16384 (the default), or 32768.
+- CPU threads are set automatically. Prompt processing uses the physical cores, and generation uses at most 8,
+  because it is memory-bound.
+- Memory check: the app estimates the file size × 1.2 + 32 KiB per context token + 256 MiB.
+  If that exceeds the free memory of the selected device, the dialog shows a warning; the model still loads.
+- The "Recommended" model is the largest Q4_K_M up to 8B that fits the free memory of the selected device
+  (system memory for the CPU).
+- Changing the device or the context length reloads the model. The title bar shows the model and the device, for example `2B · Q4_K_M · Vulkan0`.
 
 ## 9. UI
 

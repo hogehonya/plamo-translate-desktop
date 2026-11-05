@@ -149,8 +149,22 @@ pub struct SessionOptions {
     pub n_ctx: u32,
     /// Maximum number of prompt tokens decoded per batch.
     pub n_batch: u32,
-    /// CPU threads. `None` uses llama.cpp's default.
+    /// CPU threads for generation. `None` uses llama.cpp's default.
     pub n_threads: Option<i32>,
+    /// CPU threads for prompt processing. `None` uses llama.cpp's default.
+    pub n_threads_batch: Option<i32>,
+}
+
+impl SessionOptions {
+    /// Thread counts suited to this machine: prompt processing scales with physical cores,
+    /// while generation is memory-bound and stops improving after a few threads.
+    pub fn with_auto_threads(mut self) -> Self {
+        let logical = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let physical = (logical / 2).max(1) as i32;
+        self.n_threads = Some(physical.min(8));
+        self.n_threads_batch = Some(physical);
+        self
+    }
 }
 
 impl Default for SessionOptions {
@@ -159,6 +173,7 @@ impl Default for SessionOptions {
             n_ctx: 16384,
             n_batch: 2048,
             n_threads: None,
+            n_threads_batch: None,
         }
     }
 }
@@ -241,7 +256,10 @@ impl Model {
             .with_n_ctx(NonZeroU32::new(options.n_ctx))
             .with_n_batch(options.n_batch.min(options.n_ctx));
         if let Some(n) = options.n_threads {
-            params = params.with_n_threads(n).with_n_threads_batch(n);
+            params = params.with_n_threads(n);
+        }
+        if let Some(n) = options.n_threads_batch.or(options.n_threads) {
+            params = params.with_n_threads_batch(n);
         }
         let ctx = self.model.new_context(&runtime.backend, params)?;
         let n_batch = ctx.n_batch() as usize;

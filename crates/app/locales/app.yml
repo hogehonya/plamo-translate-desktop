@@ -80,8 +80,31 @@ status.no_model:
   ja: モデルが選択されていません。「モデル」からダウンロードしてください。
 
 models.title:
-  en: Models
-  ja: モデル
+  en: Models and device
+  ja: モデルと実行デバイス
+
+backend.device:
+  en: Device
+  ja: 実行デバイス
+backend.context:
+  en: Context length
+  ja: コンテキスト長
+backend.context_hint:
+  en: Longer contexts translate longer texts at once but use more memory.
+  ja: 長くすると一度に長文を翻訳できますが、メモリを多く使います。
+backend.tokens:
+  en: "%{count} tokens"
+  ja: "%{count} トークン"
+backend.auto:
+  en: "Automatic (%{device})"
+  ja: "自動（%{device}）"
+backend.cpu:
+  en: CPU only
+  ja: CPU のみ
+backend.memory_warning:
+  en: "This model may not fit on %{device}: it needs about %{required}, and %{available} is free."
+  ja: "このモデルは %{device} に収まらない可能性があります（必要量 約 %{required}、空き %{available}）。"
+
 models.none:
   en: No model
   ja: モデル未選択

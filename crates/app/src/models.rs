@@ -74,6 +74,11 @@ impl ModelsPanel {
         self.downloads.store()
     }
 
+    pub fn set_recommended(&mut self, entry: &'static CatalogEntry, cx: &mut Context<Self>) {
+        self.recommended = entry;
+        cx.notify();
+    }
+
     pub fn set_active(&mut self, entry: Option<&'static CatalogEntry>, cx: &mut Context<Self>) {
         self.active = entry.map(CatalogEntry::id);
         cx.notify();
