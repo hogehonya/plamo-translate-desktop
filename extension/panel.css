@@ -59,7 +59,7 @@ button { white-space: nowrap; }
 button { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }
 button.small { padding: 1px 6px; font-size: 12px; }
-/* Translating the page is the panel's other main action, so it stands out under the controls. */
+/* Translating the page is the panel's other main action, so it stands out at the top. */
 button.page-button {
   width: 100%;
   padding: 6px 8px;
