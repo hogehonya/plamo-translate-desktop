@@ -1,0 +1,152 @@
+{
+  "name": {
+    "message": "PLaMo Translate"
+  },
+  "description": {
+    "message": "PLaMo Translate Desktop の PLaMo 3 Translate で、ブラウザの文章を手元のパソコンで翻訳します。"
+  },
+  "menuTranslate": {
+    "message": "PLaMo で翻訳"
+  },
+  "translate": {
+    "message": "翻訳"
+  },
+  "stop": {
+    "message": "中止"
+  },
+  "copy": {
+    "message": "コピー"
+  },
+  "copied": {
+    "message": "コピーしました"
+  },
+  "sourcePlaceholder": {
+    "message": "翻訳する文章。ページで文章を選択して右クリックメニューの「PLaMo で翻訳」を選ぶか、ここに入力または貼り付けます（Ctrl+Enter で翻訳）。"
+  },
+  "builtWith": {
+    "message": "Built with PLaMo"
+  },
+  "translatingInto": {
+    "message": "$LANG$に翻訳中…",
+    "placeholders": {
+      "lang": {
+        "content": "$1"
+      }
+    }
+  },
+  "done": {
+    "message": "完了 · $TOKENS$ トークン",
+    "placeholders": {
+      "tokens": {
+        "content": "$1"
+      }
+    }
+  },
+  "doneCut": {
+    "message": "完了 · 繰り返しが止まらなかった $COUNT$ か所を打ち切りました",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "stopped": {
+    "message": "中止しました"
+  },
+  "statusLoading": {
+    "message": "$MODEL$ を読み込み中…",
+    "placeholders": {
+      "model": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusNoModel": {
+    "message": "モデルが選択されていません"
+  },
+  "statusError": {
+    "message": "エラー"
+  },
+  "statusDisconnected": {
+    "message": "未接続"
+  },
+  "noticeSetup": {
+    "message": "PLaMo Translate Desktop に接続できません。アプリのステータスバーの歯車から「設定」を開き、「ブラウザ拡張」の「連携する」を押してから、このパネルを開き直してください。"
+  },
+  "noticeDisconnected": {
+    "message": "PLaMo Translate Desktop との接続が切れました: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorNoModel": {
+    "message": "モデルが選択されていません。PLaMo Translate Desktop のステータスバーのモデルボタンから、モデルを選んでダウンロードしてください。"
+  },
+  "errorModelMissing": {
+    "message": "選択したモデルのファイルが見つかりません。PLaMo Translate Desktop でモデルを選び直してください。"
+  },
+  "errorFailed": {
+    "message": "翻訳に失敗しました: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "style_default": {
+    "message": "文体：指定なし"
+  },
+  "style_polite": {
+    "message": "文体：です・ます"
+  },
+  "style_plain": {
+    "message": "文体：だ・である"
+  },
+  "lang_auto": {
+    "message": "日本語 ⇄ 英語（自動）"
+  },
+  "lang_ja": {
+    "message": "日本語"
+  },
+  "lang_en": {
+    "message": "英語"
+  },
+  "lang_zh_hans": {
+    "message": "中国語（簡体字）"
+  },
+  "lang_zh_hant": {
+    "message": "中国語（繁体字）"
+  },
+  "lang_ko": {
+    "message": "韓国語"
+  },
+  "lang_fr": {
+    "message": "フランス語"
+  },
+  "lang_de": {
+    "message": "ドイツ語"
+  },
+  "lang_es": {
+    "message": "スペイン語"
+  },
+  "lang_it": {
+    "message": "イタリア語"
+  },
+  "lang_pt": {
+    "message": "ポルトガル語"
+  },
+  "lang_ru": {
+    "message": "ロシア語"
+  },
+  "lang_vi": {
+    "message": "ベトナム語"
+  },
+  "lang_th": {
+    "message": "タイ語"
+  },
+  "lang_id": {
+    "message": "インドネシア語"
+  }
+}

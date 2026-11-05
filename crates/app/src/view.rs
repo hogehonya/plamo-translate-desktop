@@ -28,6 +28,7 @@ use rust_i18n::t;
 
 use crate::align::{Alignment, ChunkSpan, Side};
 use crate::backend::{self, BackendEvent, BackendPanel};
+use crate::browser;
 use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
@@ -99,6 +100,77 @@ fn token_choices(document: &DocumentSettings) -> (Vec<Choice<usize>>, Vec<Choice
             defaults.history_tokens,
         ),
     )
+}
+
+/// The browser extension section of the settings dialog.
+fn browser_settings(
+    registration: browser::Registration,
+    error: Option<String>,
+    muted: Hsla,
+    view: WeakEntity<TranslatorView>,
+) -> AnyElement {
+    let host = browser::host_executable();
+    let status = match (&registration, &host) {
+        (_, None) => t!("settings.browser_no_host").into_owned(),
+        (browser::Registration::NotRegistered, _) => {
+            t!("settings.browser_not_registered").into_owned()
+        }
+        (browser::Registration::Registered, _) => t!("settings.browser_registered").into_owned(),
+        (browser::Registration::Elsewhere(path), _) => t!(
+            "settings.browser_elsewhere",
+            path = path.display().to_string()
+        )
+        .into_owned(),
+    };
+    let registered = registration == browser::Registration::Registered;
+    let action = if registered {
+        t!("settings.browser_unregister")
+    } else {
+        t!("settings.browser_register")
+    };
+    let toggle = {
+        let view = view.clone();
+        Button::new("browser-register")
+            .small()
+            .label(action.into_owned())
+            .disabled(host.is_none())
+            .on_click(move |_, window, cx| {
+                let _ = view.update(cx, |this, _| this.set_browser_registration(!registered));
+                window.refresh();
+            })
+    };
+    let open_folder = browser::extension_dir().map(|dir| {
+        Button::new("browser-folder")
+            .small()
+            .ghost()
+            .label(t!("settings.browser_open_folder").into_owned())
+            .on_click(move |_, _, cx| cx.open_with_system(&dir))
+    });
+    v_flex()
+        .gap_2()
+        .pt_2()
+        .child(
+            h_flex()
+                .gap_3()
+                .text_sm()
+                .child(div().w(px(140.)).child(t!("settings.browser").into_owned()))
+                .child(div().flex_1().child(status))
+                .child(toggle)
+                .children(open_folder),
+        )
+        .children(error.map(|e| {
+            div()
+                .text_xs()
+                .text_color(gpui_kit::red())
+                .child(t!("settings.browser_error", message = e).into_owned())
+        }))
+        .child(
+            div()
+                .text_xs()
+                .text_color(muted)
+                .child(t!("settings.browser_note").into_owned()),
+        )
+        .into_any_element()
 }
 
 /// Switches between the light and dark theme, following the OS for [`ThemeSetting::System`].
@@ -300,6 +372,8 @@ pub struct TranslatorView {
     /// The shown translation was stopped or failed part-way, so it neither satisfies a repeated
     /// request nor goes into the cache.
     shown_partial: bool,
+    /// Browser host registration as last checked, and the error of the last change, if any.
+    browser: (browser::Registration, Option<String>),
     copied: bool,
     debounce: Task<()>,
     copied_reset: Task<()>,
@@ -571,6 +645,7 @@ impl TranslatorView {
             pending_loads: 0,
             runtime_error: None,
             shown_partial: false,
+            browser: (browser::Registration::NotRegistered, None),
             copied: false,
             debounce: Task::ready(()),
             copied_reset: Task::ready(()),
@@ -811,6 +886,7 @@ impl TranslatorView {
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.browser = (browser::registration(), None);
         let language = self.ui_language_select.clone();
         let theme = self.theme_select.clone();
         let chunk = self.chunk_select.clone();
@@ -819,10 +895,15 @@ impl TranslatorView {
         window.open_dialog(cx, move |dialog, _, cx| {
             // Read on every render: the theme can change from this dialog.
             let muted = cx.theme().muted_foreground;
-            let sync_scroll = view
+            let (sync_scroll, (registration, browser_error)) = view
                 .upgrade()
-                .is_some_and(|view| view.read(cx).settings.sync_scroll);
+                .map(|view| {
+                    let this = view.read(cx);
+                    (this.settings.sync_scroll, this.browser.clone())
+                })
+                .unwrap_or((false, (browser::Registration::NotRegistered, None)));
             let toggle_view = view.clone();
+            let browser_view = view.clone();
             let row = |label: &str, select: AnyElement| {
                 h_flex()
                     .gap_3()
@@ -833,7 +914,7 @@ impl TranslatorView {
             let select = |state: &Entity<_>| Select::new(state).w(px(260.)).into_any_element();
             dialog
                 .title(t!("settings.title").into_owned())
-                .w(px(520.))
+                .w(px(600.))
                 .child(
                     v_flex()
                         .gap_3()
@@ -868,9 +949,31 @@ impl TranslatorView {
                                 .text_xs()
                                 .text_color(muted)
                                 .child(t!("settings.sync_scroll_note").into_owned()),
-                        ),
+                        )
+                        .child(browser_settings(
+                            registration,
+                            browser_error,
+                            muted,
+                            browser_view,
+                        )),
                 )
         });
+    }
+
+    /// Registers the browser host, or removes the registration.
+    fn set_browser_registration(&mut self, register: bool) {
+        let result = if register {
+            browser::register().map(|browsers| {
+                crate::app_log!("browser host registered with {}", browsers.join(", "));
+            })
+        } else {
+            browser::unregister().map(|()| crate::app_log!("browser host unregistered"))
+        };
+        let error = result.err().map(|e| {
+            crate::app_log!("browser host registration failed: {e}");
+            e.to_string()
+        });
+        self.browser = (browser::registration(), error);
     }
 
     fn set_document(
@@ -1099,7 +1202,7 @@ impl TranslatorView {
         // (where it would make a cached result miss after a language change).
         let document = request
             .document
-            .options(t!("output.cut_marker").into_owned());
+            .options(appdata::cut_marker(&rust_i18n::locale()).to_owned());
         self.current_job = Some(self.worker.translate(
             request.options.clone(),
             document,

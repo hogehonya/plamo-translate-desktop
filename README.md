@@ -63,6 +63,21 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
 
 On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 
+## Browser extension
+
+The packages include an extension for Chrome and Edge (`browser-extension/`) that translates text in the browser with the model selected in the app.
+
+1. In the app, open Settings (the gear in the status bar) and choose **Connect** under Browser extension.
+   This registers the bundled `plamo-translate-host` with Chrome and Edge (on Linux also Chromium and Brave).
+2. Open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked**,
+   and select the `browser-extension` folder (**Open extension folder** in the same Settings section).
+3. Select text on a page, right-click, and choose **Translate with PLaMo**: the side panel shows the translation as it streams in.
+   The toolbar button opens the panel to type or paste text.
+
+The browser starts the host while the panel is open. It uses the model and device selected in the app, but loads its own copy,
+so with the app open as well the model is in memory twice. If you move the app's folder, choose Connect again.
+Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
+
 ## Building from source
 
 Requirements: Rust 1.92 or later, CMake, and a C/C++ compiler.
@@ -104,7 +119,10 @@ or run it with `cargo run`, which finds them in the build directory.
 
 - `crates/pfml`: PFML3 prompt builder (the PLaMo prompt format).
 - `crates/engine`: llama.cpp backend, model catalog, downloads, long-text splitting. No GUI dependency.
+- `crates/appdata`: settings, file locations, and logging, shared by the app and the browser host.
 - `crates/app`: the GPUI application.
+- `crates/host`: `plamo-translate-host`, the native messaging host for the browser extension.
+- `extension/`: the browser extension (Manifest V3).
 - `docs/design.md`: the design document.
 
 Two command-line examples run the engine without the GUI:

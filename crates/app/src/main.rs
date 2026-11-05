@@ -6,14 +6,15 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod align;
-mod applog;
 mod assets;
 mod backend;
-mod glossary;
+mod browser;
 mod lang;
 mod models;
-mod settings;
 mod view;
+
+// Shared with the browser host; re-exported so the app refers to them as its own modules.
+pub(crate) use appdata::{app_log, applog, glossary, settings};
 
 use std::path::PathBuf;
 

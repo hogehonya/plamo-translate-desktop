@@ -1,0 +1,152 @@
+{
+  "name": {
+    "message": "PLaMo Translate"
+  },
+  "description": {
+    "message": "Translate text in the browser with PLaMo 3 Translate running locally in PLaMo Translate Desktop."
+  },
+  "menuTranslate": {
+    "message": "Translate with PLaMo"
+  },
+  "translate": {
+    "message": "Translate"
+  },
+  "stop": {
+    "message": "Stop"
+  },
+  "copy": {
+    "message": "Copy"
+  },
+  "copied": {
+    "message": "Copied"
+  },
+  "sourcePlaceholder": {
+    "message": "Text to translate. Select text on a page and choose \"Translate with PLaMo\" from the context menu, or type or paste it here (Ctrl+Enter translates)."
+  },
+  "builtWith": {
+    "message": "Built with PLaMo"
+  },
+  "translatingInto": {
+    "message": "Translating into $LANG$…",
+    "placeholders": {
+      "lang": {
+        "content": "$1"
+      }
+    }
+  },
+  "done": {
+    "message": "Done · $TOKENS$ tokens",
+    "placeholders": {
+      "tokens": {
+        "content": "$1"
+      }
+    }
+  },
+  "doneCut": {
+    "message": "Done · $COUNT$ passage(s) kept repeating and were cut",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "stopped": {
+    "message": "Stopped"
+  },
+  "statusLoading": {
+    "message": "Loading $MODEL$…",
+    "placeholders": {
+      "model": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusNoModel": {
+    "message": "No model selected"
+  },
+  "statusError": {
+    "message": "Error"
+  },
+  "statusDisconnected": {
+    "message": "Not connected"
+  },
+  "noticeSetup": {
+    "message": "Cannot reach PLaMo Translate Desktop. Open the app, go to Settings (the gear in the status bar), and choose \"Connect\" under Browser extension. Then reload this panel."
+  },
+  "noticeDisconnected": {
+    "message": "The connection to PLaMo Translate Desktop ended: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorNoModel": {
+    "message": "No model is selected. Choose and download one in PLaMo Translate Desktop (the model button in the status bar)."
+  },
+  "errorModelMissing": {
+    "message": "The selected model file is missing. Choose a model again in PLaMo Translate Desktop."
+  },
+  "errorFailed": {
+    "message": "Translation failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "style_default": {
+    "message": "Style: any"
+  },
+  "style_polite": {
+    "message": "Style: polite (です・ます)"
+  },
+  "style_plain": {
+    "message": "Style: plain (だ・である)"
+  },
+  "lang_auto": {
+    "message": "Japanese ⇄ English (auto)"
+  },
+  "lang_ja": {
+    "message": "Japanese"
+  },
+  "lang_en": {
+    "message": "English"
+  },
+  "lang_zh_hans": {
+    "message": "Chinese (Simplified)"
+  },
+  "lang_zh_hant": {
+    "message": "Chinese (Traditional)"
+  },
+  "lang_ko": {
+    "message": "Korean"
+  },
+  "lang_fr": {
+    "message": "French"
+  },
+  "lang_de": {
+    "message": "German"
+  },
+  "lang_es": {
+    "message": "Spanish"
+  },
+  "lang_it": {
+    "message": "Italian"
+  },
+  "lang_pt": {
+    "message": "Portuguese"
+  },
+  "lang_ru": {
+    "message": "Russian"
+  },
+  "lang_vi": {
+    "message": "Vietnamese"
+  },
+  "lang_th": {
+    "message": "Thai"
+  },
+  "lang_id": {
+    "message": "Indonesian"
+  }
+}

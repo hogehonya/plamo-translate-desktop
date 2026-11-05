@@ -1,0 +1,16 @@
+[package]
+name = "plamo-translate-host"
+description = "Native messaging host that lets the PLaMo Translate browser extension translate with the desktop app's models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+appdata.workspace = true
+engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true

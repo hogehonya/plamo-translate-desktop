@@ -1,6 +1,7 @@
 //! Inference device and context settings.
 
-use engine::llama::{Device, DeviceKind, GpuOffload, ModelOptions};
+pub use appdata::devices::{device_label, model_options, resolve};
+use engine::llama::{Device, DeviceKind};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -10,31 +11,6 @@ use rust_i18n::t;
 use crate::lang::{self, Choice};
 use crate::models::format_bytes;
 use crate::settings::{BackendSettings, DeviceSetting};
-
-/// The device a setting resolves to on this machine. `None` means the CPU.
-pub fn resolve<'a>(setting: &DeviceSetting, devices: &'a [Device]) -> Option<&'a Device> {
-    let best_gpu = || {
-        devices
-            .iter()
-            .filter(|d| d.kind == DeviceKind::Gpu)
-            .max_by_key(|d| d.memory_free)
-    };
-    match setting {
-        DeviceSetting::Auto => best_gpu(),
-        DeviceSetting::Cpu => None,
-        // A device that disappeared (driver change, unplugged eGPU) falls back to automatic.
-        DeviceSetting::Device(name) => devices.iter().find(|d| &d.name == name).or_else(best_gpu),
-    }
-}
-
-pub fn model_options(device: Option<&Device>) -> ModelOptions {
-    ModelOptions {
-        gpu: device.map(|d| GpuOffload {
-            device: d.index,
-            layers: None,
-        }),
-    }
-}
 
 /// Memory available to the model on `device`, or system memory for the CPU.
 pub fn available_memory(device: Option<&Device>, devices: &[Device]) -> u64 {
@@ -52,10 +28,6 @@ pub fn available_memory(device: Option<&Device>, devices: &[Device]) -> u64 {
 /// of the file size across the published models (measured 297 MiB for 2B Q4_K_M).
 pub fn estimate_required(model_bytes: u64) -> u64 {
     model_bytes + model_bytes / 5 + (384 << 20)
-}
-
-pub fn device_label(device: Option<&Device>) -> String {
-    device.map_or_else(|| "CPU".to_owned(), |d| d.name.clone())
 }
 
 pub enum BackendEvent {

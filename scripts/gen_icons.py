@@ -4,7 +4,8 @@
 The icon is a white block "p" on a blue rounded tile. All shapes are rectangles on a 32x32
 grid, so this script renders them itself and needs only the Python standard library.
 
-Usage: python3 scripts/gen_icons.py [OUTPUT_DIR]   (default: assets/icon)
+Usage: python3 scripts/gen_icons.py [OUTPUT_DIR [EXTENSION_ICON_DIR]]
+       (defaults: assets/icon and extension/icons)
 """
 
 import struct
@@ -21,6 +22,8 @@ PALE_BLUE = (0xB8, 0xD4, 0xEA)
 
 # The Linux package ships the 256 px PNG with its desktop entry; the .ico embeds all ICO_SIZES.
 PNG_SIZES = [256]
+# Sizes the browser extension's manifest lists.
+EXTENSION_SIZES = [16, 32, 48, 128]
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
 
@@ -141,17 +144,23 @@ def ico_bytes(images):
 
 def main():
     out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "assets/icon")
+    extension_dir = Path(sys.argv[2] if len(sys.argv) > 2 else "extension/icons")
     out_dir.mkdir(parents=True, exist_ok=True)
+    extension_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "icon.svg").write_text(svg(), encoding="utf-8")
 
-    rendered = {size: render(size) for size in sorted(set(PNG_SIZES) | set(ICO_SIZES))}
+    sizes = set(PNG_SIZES) | set(ICO_SIZES) | set(EXTENSION_SIZES)
+    rendered = {size: render(size) for size in sorted(sizes)}
     for size in PNG_SIZES:
         (out_dir / f"icon-{size}.png").write_bytes(png_bytes(rendered[size]))
     ico = ico_bytes(
         [(s, png_bytes(rendered[s]) if s >= 256 else dib_bytes(rendered[s])) for s in ICO_SIZES]
     )
     (out_dir / "icon.ico").write_bytes(ico)
-    print("wrote", ", ".join(sorted(p.name for p in out_dir.iterdir())))
+    for size in EXTENSION_SIZES:
+        (extension_dir / f"icon-{size}.png").write_bytes(png_bytes(rendered[size]))
+    for d in (out_dir, extension_dir):
+        print("wrote", d, ", ".join(sorted(p.name for p in d.iterdir())))
 
 
 if __name__ == "__main__":

@@ -69,7 +69,10 @@ crates/
   engine/   Backend trait, llama.cpp backend, model catalog and discovery, downloader,
             long-text splitting and loop detection. No GUI dependency.
             examples/translate.rs and examples/download.rs are headless CLIs for testing.
+  appdata/  Settings, file locations, logging, device selection: shared by app and host.
   app/      GPUI application (binary `plamo-translate-desktop`).
+  host/     Native messaging host for the browser extension (binary `plamo-translate-host`).
+extension/  Browser extension (Manifest V3) for Chrome and Edge.
 assets/     Icon (scripts/gen_icons.py) and the Linux desktop entry.
 licenses/   License texts appended to THIRD-PARTY-NOTICES.txt (scripts/notices.sh).
 scripts/    Icon generator, notices generator, ROCm build environment.
@@ -433,10 +436,39 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
 - Linux build dependencies: CMake and `libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev`,
   plus `libvulkan-dev glslc spirv-headers` for the Vulkan backend.
 
-## 12. Status and later work
+## 12. Browser extension
+
+The extension (`extension/`) translates in the browser with the desktop app's model, through Chrome's native messaging.
+
+- Components:
+  - `plamo-translate-host` ships next to the app and shares its DLLs/shared libraries, models, and settings, so the package grows by about 1 MB.
+    It has no GPUI dependency. It is a console program on Windows too, since Chrome starts hosts through `cmd.exe` with the window hidden.
+  - The extension: a context menu item ("Translate with PLaMo") for selected text and a side panel that streams the translation.
+    The panel holds the native port, so the host runs while the panel is open.
+- Registration (Settings → Browser extension → Connect, `crates/app/src/browser.rs`) writes a host manifest named
+  `com.github.tanakh.plamo_translate` that points to the host and allows only the extension's ID:
+  - Windows: the manifest in the data directory, referenced from `HKCU\Software\{Google\Chrome,Microsoft\Edge}\NativeMessagingHosts`.
+  - Linux: a copy in `NativeMessagingHosts/` of each browser that has a configuration directory (Chrome, Chromium, Edge, Brave), or Chrome's if none has.
+  - The settings show whether the registration points to this copy of the app, so a moved app can be connected again.
+- The extension's ID (`bcagbgackmnblhlofmpcmjfkfhhogpmh`) follows from the public key in its manifest, so the unpacked extension always has it.
+  A Chrome Web Store release would get another ID, which must be added to `EXTENSION_IDS`.
+- Protocol (`crates/host/src/protocol.rs`): length-prefixed JSON both ways.
+  - Requests: `translate { id, text, target (code or auto), source, style }`, `cancel`, `status`.
+  - Responses: `status` (starting, loading, ready, no_model, error), `started`, `progress`, `text`, `rewind` (a UTF-16 length, as JavaScript counts),
+    `done { tokens, cut, stopped }`, and `error` with a code the extension localizes.
+  - The host reads the app's settings before each request and reloads when the model or device changed.
+    It uses the app's glossary, chunk and history sizes, and cut marker.
+  - A new request supersedes the running one, as in the app; the superseded one ends with `done { stopped }`.
+- Limits:
+  - The host loads its own copy of the model, so with the app open the model is in memory twice. Relaying to a running app would avoid that.
+  - Browsers installed as Snap or Flatpak packages on Linux cannot start programs outside their sandbox.
+  - Firefox would need its own manifest format (`allowed_extensions`) and an extension build for it.
+- Translating without the desktop app (WASM llama.cpp or WebGPU in the extension) is possible later; it would be much slower and limited to the small models.
+
+## 13. Status and later work
 
 Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2), device selection (M3),
-translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
+translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry), and the browser extension.
 
 Possible later work:
 
@@ -446,7 +478,7 @@ Possible later work:
 - A global hotkey that translates the clipboard.
 - Remote inference backends (§1).
 
-## 13. Risks
+## 14. Risks
 
 | Risk | Status |
 |---|---|

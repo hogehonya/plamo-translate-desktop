@@ -19,20 +19,28 @@ pub fn models_dir() -> PathBuf {
 
 /// Catalog entries found on Hugging Face, cached for offline starts.
 pub fn catalog_cache_path() -> PathBuf {
-    models_dir().parent().map_or_else(
-        || PathBuf::from("catalog.json"),
-        |dir| dir.join("catalog.json"),
-    )
+    data_file("catalog.json")
 }
 
 /// The application log, next to the models.
 pub fn log_path() -> PathBuf {
-    models_dir()
-        .parent()
-        .map_or_else(|| PathBuf::from("app.log"), |dir| dir.join("app.log"))
+    data_file("app.log")
 }
 
-fn settings_path() -> Option<PathBuf> {
+/// The browser host's log, next to the app's.
+pub fn host_log_path() -> PathBuf {
+    data_file("host.log")
+}
+
+/// A file in the data directory, which holds the models directory.
+pub fn data_file(name: &str) -> PathBuf {
+    models_dir()
+        .parent()
+        .map_or_else(|| PathBuf::from(name), |dir| dir.join(name))
+}
+
+/// Where the settings are saved.
+pub fn settings_path() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("settings.json"))
 }
 

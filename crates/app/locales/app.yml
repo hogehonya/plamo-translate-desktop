@@ -79,9 +79,6 @@ status.ready:
 status.translating:
   en: "Translating into %{lang}…"
   ja: "%{lang}に翻訳中…"
-output.cut_marker:
-  en: " [translation cut off here: it kept repeating]"
-  ja: "〔繰り返しが止まらなかったため、この文の訳を打ち切りました〕"
 status.tokens:
   en: "%{count} tokens"
   ja: "%{count} トークン"
@@ -418,6 +415,36 @@ settings.history:
 settings.sync_scroll:
   en: Scroll the source and the translation together
   ja: 原文と訳文を連動してスクロール
+settings.browser:
+  en: Browser extension
+  ja: ブラウザ拡張
+settings.browser_not_registered:
+  en: Not connected
+  ja: 未連携
+settings.browser_registered:
+  en: Connected
+  ja: 連携済み
+settings.browser_elsewhere:
+  en: "Connected to another copy of the app: %{path}"
+  ja: "別の場所のアプリと連携しています: %{path}"
+settings.browser_no_host:
+  en: The browser host (plamo-translate-host) is not next to the app
+  ja: ブラウザ用のホスト（plamo-translate-host）がアプリと同じフォルダにありません
+settings.browser_register:
+  en: Connect
+  ja: 連携する
+settings.browser_unregister:
+  en: Disconnect
+  ja: 連携を解除
+settings.browser_open_folder:
+  en: Open extension folder
+  ja: 拡張機能のフォルダを開く
+settings.browser_error:
+  en: "Could not change the connection: %{message}"
+  ja: "連携を変更できませんでした: %{message}"
+settings.browser_note:
+  en: "Connecting lets the PLaMo Translate extension translate in the browser with the model selected here. To install the extension, open chrome://extensions (or edge://extensions), turn on Developer mode, choose \"Load unpacked\", and select the extension folder."
+  ja: "連携すると、ブラウザの PLaMo Translate 拡張機能が、ここで選んだモデルで翻訳できるようになります。拡張機能は、chrome://extensions（Edge なら edge://extensions）を開いてデベロッパー モードをオンにし、「パッケージ化されていない拡張機能を読み込む」で拡張機能のフォルダを選ぶと入ります。"
 settings.sync_scroll_note:
   en: "Scrolling one pane scrolls the other to the same place. Moving the caret in one pane selects the corresponding paragraph in the other."
   ja: "片方をスクロールすると、もう片方も同じ箇所までスクロールします。片方でカーソルを動かすと、もう片方で対応する段落を選択します。"

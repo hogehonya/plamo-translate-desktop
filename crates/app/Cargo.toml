@@ -15,15 +15,16 @@ repository.workspace = true
 rocm = ["engine/rocm"]
 
 [dependencies]
+appdata.workspace = true
 engine.workspace = true
 gpui-kit = "=0.9.0"
 async-channel = "2"
-directories = "6"
 rust-i18n = "4.2"
-sys-locale = "0.3"
 serde.workspace = true
 serde_json.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
 
 [build-dependencies]
 winresource = "0.1"

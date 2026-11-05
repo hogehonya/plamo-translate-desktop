@@ -14,6 +14,7 @@ repository = "https://github.com/tanakh/plamo-translate-desktop"
 [workspace.dependencies]
 pfml = { path = "crates/pfml" }
 engine = { path = "crates/engine" }
+appdata = { path = "crates/appdata" }
 
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

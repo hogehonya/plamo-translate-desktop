@@ -188,6 +188,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "appdata"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "directories",
+ "engine",
+ "serde",
+ "serde_json",
+ "sys-locale",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4731,16 +4743,25 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 name = "plamo-translate-desktop"
 version = "0.1.0"
 dependencies = [
+ "appdata",
  "async-channel",
- "chrono",
- "directories",
  "engine",
  "gpui-kit",
  "rust-i18n",
  "serde",
  "serde_json",
- "sys-locale",
+ "winreg",
  "winresource",
+]
+
+[[package]]
+name = "plamo-translate-host"
+version = "0.1.0"
+dependencies = [
+ "appdata",
+ "engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -66,11 +66,7 @@ impl StyleChoice {
     }
 }
 
-/// Whether `text` contains kana. Kanji alone is ambiguous with Chinese, so it does not count.
-pub fn looks_japanese(text: &str) -> bool {
-    text.chars()
-        .any(|c| matches!(c, '\u{3040}'..='\u{309f}' | '\u{30a0}'..='\u{30ff}' | '\u{31f0}'..='\u{31ff}'))
-}
+pub use appdata::looks_japanese;
 
 /// Localized display name of a language code.
 pub fn language_name(code: &str) -> String {

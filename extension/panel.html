@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PLaMo Translate</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/icon-32.png" width="20" height="20" alt="" />
+      <h1>PLaMo Translate</h1>
+      <span id="status" class="status"></span>
+    </header>
+
+    <div class="controls">
+      <select id="target" aria-label="target"></select>
+      <select id="style" aria-label="style"></select>
+      <button id="translate" class="primary" data-i18n="translate"></button>
+    </div>
+
+    <textarea id="source" rows="6" data-i18n-placeholder="sourcePlaceholder"></textarea>
+
+    <div class="output-header">
+      <span id="progress"></span>
+      <button id="copy" data-i18n="copy" disabled></button>
+    </div>
+    <div id="output" class="output" aria-live="polite"></div>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <footer data-i18n="builtWith"></footer>
+    <script src="panel.js"></script>
+  </body>
+</html>

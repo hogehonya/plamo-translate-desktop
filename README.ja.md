@@ -63,6 +63,21 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
 
 どちらも、Vulkan で使える単体 GPU があればそれで翻訳し、無ければ CPU が対応する最速の方式（AVX2 または AVX-512）で翻訳します。
 
+## ブラウザ拡張
+
+配布物には、Chrome と Edge 用の拡張機能（`browser-extension/`）が入っています。アプリで選んだモデルで、ブラウザ上の文章を翻訳できます。
+
+1. アプリのステータスバーの歯車から「設定」を開き、「ブラウザ拡張」の **連携する** を押します。
+   同梱の `plamo-translate-host` を Chrome と Edge に登録します（Linux では Chromium と Brave にも登録します）。
+2. `chrome://extensions`（Edge なら `edge://extensions`）を開いてデベロッパー モードをオンにし、**パッケージ化されていない拡張機能を読み込む** で
+   `browser-extension` フォルダを選びます（同じ設定の **拡張機能のフォルダを開く** で開けます）。
+3. ページの文章を選択して右クリックし、**PLaMo で翻訳** を選ぶと、サイドパネルに訳文が流れるように表示されます。
+   ツールバーのボタンでパネルを開き、文章を入力したり貼り付けたりして訳すこともできます。
+
+パネルを開いている間、ブラウザがホストを起動します。ホストはアプリで選んだモデルとデバイスを使いますが、モデルは別に読み込むので、
+アプリも開いているとメモリにモデルが 2 つ載ります。アプリのフォルダを移動したときは、もう一度「連携する」を押してください。
+Linux の Snap 版や Flatpak 版のブラウザは、ホストを起動できません。
+
 ## ソースからのビルド
 
 必要なもの: Rust 1.92 以上、CMake、C/C++ コンパイラ。
@@ -103,7 +118,10 @@ cargo build -p plamo-translate-desktop --release --features engine/vulkan,engine
 
 - `crates/pfml`: PFML3（PLaMo のプロンプト形式）のプロンプト構築。
 - `crates/engine`: llama.cpp のバックエンド、モデルカタログ、ダウンロード、長文の分割。GUI には依存しません。
+- `crates/appdata`: 設定、ファイルの置き場所、ログ。アプリとブラウザ用のホストで共有します。
 - `crates/app`: GPUI のアプリケーション本体。
+- `crates/host`: ブラウザ拡張用の Native Messaging のホスト（`plamo-translate-host`）。
+- `extension/`: ブラウザ拡張（Manifest V3）。
 - `docs/design.md`: 設計書（英語）。
 
 GUI なしでエンジンを動かすコマンドラインの例が 2 つあります。

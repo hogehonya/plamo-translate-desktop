@@ -84,7 +84,8 @@ jobs:
           set -euo pipefail
           dist="dist/$PACKAGE"
           mkdir -p "$dist"
-          cp target/dist/plamo-translate-desktop "$dist/"
+          cp target/dist/plamo-translate-desktop target/dist/plamo-translate-host "$dist/"
+          cp -r extension "$dist/browser-extension"
           # Newest llama-cpp-sys-2 build output with backend modules.
           backends=$(ls -td target/dist/build/llama-cpp-sys-2-*/out/backends | head -n1)
           test -n "$backends" || { echo "llama-cpp-sys-2 backend modules not found"; exit 1; }
@@ -111,6 +112,7 @@ jobs:
           cp target/dist/examples/translate "$dist/"
           env -u LD_LIBRARY_PATH "$dist/translate" --list-devices
           rm "$dist/translate"
+          env -u LD_LIBRARY_PATH "$dist/plamo-translate-host" --check
           tar -C dist -czf "$PACKAGE.tar.gz" "$PACKAGE"
 
       - uses: actions/upload-artifact@v7
@@ -180,7 +182,8 @@ jobs:
           $profile_dir = Join-Path $env:CARGO_TARGET_DIR 'dist'
           $dist = "dist\$env:PACKAGE"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          Copy-Item "$profile_dir\plamo-translate-desktop.exe" $dist
+          Copy-Item "$profile_dir\plamo-translate-desktop.exe", "$profile_dir\plamo-translate-host.exe" $dist
+          Copy-Item -Recurse extension "$dist\browser-extension"
           # Output of the newest llama-cpp-sys-2 build: llama.cpp DLLs and ggml backend modules.
           $out = Get-ChildItem "$profile_dir\build\llama-cpp-sys-2-*\out" -Directory |
             Where-Object { Test-Path (Join-Path $_.FullName 'backends') } |
@@ -226,6 +229,8 @@ jobs:
           Copy-Item "$profile_dir\examples\translate.exe" $dist
           & "$dist\translate.exe" --list-devices
           if ($LASTEXITCODE -ne 0) { throw "translate.exe failed with exit code $LASTEXITCODE" }
+          & "$dist\plamo-translate-host.exe" --check
+          if ($LASTEXITCODE -ne 0) { throw "plamo-translate-host.exe failed with exit code $LASTEXITCODE" }
           New-Item -ItemType Directory -Force cli | Out-Null
           Move-Item "$dist\translate.exe" cli
           Compress-Archive -Path $dist -DestinationPath "$env:PACKAGE.zip"
