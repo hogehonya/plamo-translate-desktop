@@ -150,7 +150,9 @@
           into.append(node.data);
         } else if (node.nodeType === Node.ELEMENT_NODE) {
           const i = Number(node.getAttribute("i"));
-          const original = node.hasAttribute("i") && Number.isInteger(i) && !used.has(i) ? elements[i] : undefined;
+          const candidate = node.hasAttribute("i") && Number.isInteger(i) && !used.has(i) ? elements[i] : undefined;
+          // The tag must match too, so a mislabelled index cannot turn emphasis into a link.
+          const original = candidate?.tagName === node.tagName ? candidate : undefined;
           if (!original) {
             // Not one of the run's elements: never inserted. Its text is kept, except for
             // elements whose content is not text to show.
