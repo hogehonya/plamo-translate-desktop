@@ -277,7 +277,11 @@ the auto-translate flag, the window geometry, and the license acceptance record.
 ## 11. Build, test, and distribution
 
 - Development and day-to-day testing happen in WSL2 (Linux build, WSLg).
-  WSLg has only a software Vulkan driver (lavapipe), so on Linux the GPU backends are exercised only through CPU there.
+  WSLg has only a software Vulkan driver (lavapipe), so Vulkan inference cannot be tested there.
+  ROCm, however, supports WSL2. The `rocm` feature (built with `scripts/rocm.sh`) runs the model on the RX 9070 XT from WSL2.
+  For 2B Q4_K_M, generation runs at about 120–150 tok/s, against about 20 tok/s on the CPU.
+  ggml also lists the integrated GPU, but only the discrete GPU's architecture is compiled; automatic selection skips integrated GPUs anyway.
+- Local Windows builds and test runs use `/mnt/e/` (a ReFS dev drive), which is faster than `C:`.
 - Windows binaries are built natively on GitHub Actions `windows-latest` (MSVC, Windows SDK, and CMake are preinstalled;
   the Vulkan SDK is installed by the workflow), not cross-compiled. Cross-compiling from Linux fails:
   - The `gpui-pre-windows` build script compiles its HLSL shaders with `fxc.exe` only when the build host is Windows.

@@ -10,6 +10,7 @@ repository.workspace = true
 
 [features]
 vulkan = ["engine/vulkan"]
+rocm = ["engine/rocm"]
 dynamic-backends = ["engine/dynamic-backends"]
 
 [dependencies]

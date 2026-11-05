@@ -50,6 +50,14 @@ sudo apt install cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev lib
 cargo run -p plamo-translate-desktop --release
 ```
 
+On Linux (including WSL2) with an AMD GPU, the ROCm (HIP) backend runs the model on the GPU.
+It needs ROCm and its development packages, for example `amdrocm-core-dev10.1-gfx1201 amdrocm-blas-dev10.1` for an RX 9070 XT.
+`scripts/rocm.sh` sets up the environment and builds into `target/rocm`:
+
+```sh
+scripts/rocm.sh cargo run -p plamo-translate-desktop --release --features rocm
+```
+
 Windows needs Visual Studio 2022 with "Desktop development with C++" (MSVC and the Windows SDK) and CMake.
 The GPU build also needs the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows):
 
