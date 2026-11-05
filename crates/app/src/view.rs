@@ -1116,7 +1116,7 @@ impl TranslatorView {
             // Logged without any text, so reports of odd output show whether loops occurred.
             Event::Retry { job, index, reason } if is_current(job) => {
                 crate::app_log!(
-                    "chunk {}: output ran away ({reason:?}); retrying sentence by sentence",
+                    "chunk {}: output ran away ({reason:?}); retrying in smaller pieces",
                     index + 1
                 );
                 return;

@@ -65,7 +65,8 @@ pub enum Event {
         job: JobId,
         len: usize,
     },
-    /// The output for chunk `index` ran away and is translated again sentence by sentence.
+    /// The output for chunk `index` (or a piece of it) ran away and is translated again in
+    /// smaller pieces.
     Retry {
         job: JobId,
         index: usize,

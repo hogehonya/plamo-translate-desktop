@@ -12,8 +12,8 @@
 //! 2048 tokens in most layers, and small models decoding greedily tend to lose their place and
 //! loop when one output runs much longer than that. When an output still runs away (see
 //! [`crate::repetition`]), it is withdrawn ([`Output::Truncate`]) and the chunk is translated
-//! again sentence by sentence; a sentence that runs away again is retried with repetition
-//! penalized, and cut if even that loops. Output that ran away never enters the history, so one
+//! again in pieces of a few sentences; a piece that runs away again is retried sentence by
+//! sentence, and a sentence with repetition penalized, cut if even that loops. Output that ran away never enters the history, so one
 //! loop cannot seed the next.
 
 use std::time::Duration;
@@ -59,8 +59,8 @@ pub enum Progress {
         count: usize,
         source: (usize, usize),
     },
-    /// The output for chunk `index` ran away (`reason`) and is translated again in `pieces`
-    /// sentences.
+    /// The output for chunk `index`, or for a piece of it being retried, ran away (`reason`) and
+    /// is translated again in `pieces` smaller pieces.
     Retry {
         index: usize,
         reason: StopReason,
@@ -70,6 +70,12 @@ pub enum Progress {
     /// was cut.
     Cut { index: usize, reason: StopReason },
 }
+
+/// Size of the pieces a chunk is translated in again after its output ran away. Small enough
+/// that loops are rare, large enough to keep some context and need only a few prompts: on the
+/// CPU, retrying a chunk sentence by sentence took minutes, mostly processing the history again
+/// for each sentence.
+const RETRY_PIECE_TOKENS: usize = 256;
 
 /// Output length limit for a source of `source_tokens` tokens. Translations are rarely more than
 /// twice as long as the source in tokens, so this only stops output that ran away.
@@ -488,9 +494,16 @@ impl Translator<'_> {
         }
     }
 
-    /// Translates chunk `index`, retrying it sentence by sentence if its output runs away.
+    /// Translates chunk `index`, retrying it in smaller pieces if its output runs away.
     /// Returns `Finished`, `Cancelled`, or `ContextFull`.
     fn chunk(&mut self, index: usize, text: &str) -> Result<StopReason> {
+        self.piece(index, text, Level::Chunk)
+    }
+
+    /// Translates `text`. If the output runs away, it is withdrawn and `text` is translated again
+    /// in smaller pieces: a chunk in pieces of up to [`RETRY_PIECE_TOKENS`], such a piece sentence
+    /// by sentence, and a single sentence with repetition penalized, cut if even that loops.
+    fn piece(&mut self, index: usize, text: &str, level: Level) -> Result<StopReason> {
         let start = self.emitted;
         let source_tokens = (self.count_tokens)(text);
         let max_tokens = max_output_tokens(source_tokens);
@@ -509,17 +522,31 @@ impl Translator<'_> {
 
         self.truncate(start);
         self.total.retries += 1;
-        let pieces = sentences_of(text);
+        // The next level that actually splits `text`: translating the same input again with the
+        // same history would only repeat the same output.
+        let mut next = level;
+        let pieces = loop {
+            next = match next.smaller() {
+                Some(next) => next,
+                None => return self.penalized(index, text, max_tokens),
+            };
+            let pieces = match next {
+                // `smaller` never returns `Chunk`.
+                Level::Chunk | Level::Piece => split(text, RETRY_PIECE_TOKENS, self.count_tokens),
+                Level::Sentence => sentences_of(text),
+            };
+            if pieces.chunks.len() > 1 {
+                break pieces;
+            }
+        };
         (self.on_progress)(Progress::Retry {
             index,
             reason,
             pieces: pieces.chunks.len(),
         });
         self.emit(pieces.leading);
-        // A single sentence already failed greedily; go straight to the penalized retry.
-        let greedy_first = pieces.chunks.len() > 1;
         for piece in &pieces.chunks {
-            let reason = self.sentence(index, piece.text, greedy_first)?;
+            let reason = self.piece(index, piece.text, next)?;
             if reason != StopReason::Finished {
                 return Ok(reason);
             }
@@ -528,23 +555,10 @@ impl Translator<'_> {
         Ok(StopReason::Finished)
     }
 
-    /// Translates one sentence of chunk `index` during a retry. Output that runs away is
-    /// translated again with repetition penalized, and cut if it runs away once more.
-    fn sentence(&mut self, index: usize, text: &str, greedy_first: bool) -> Result<StopReason> {
+    /// Translates `text`, which cannot be split further, with repetition penalized. Output that
+    /// still runs away is cut.
+    fn penalized(&mut self, index: usize, text: &str, max_tokens: usize) -> Result<StopReason> {
         let start = self.emitted;
-        let max_tokens = max_output_tokens((self.count_tokens)(text));
-        if greedy_first {
-            let (translation, reason) = self.generate(text, Generation::greedy(max_tokens))?;
-            if !reason.is_runaway() {
-                if reason == StopReason::Finished {
-                    self.remember(text, &translation);
-                }
-                return Ok(reason);
-            }
-            self.truncate(start);
-            self.total.retries += 1;
-        }
-
         let generation = Generation {
             max_tokens,
             penalize_repetition: true,
@@ -556,15 +570,34 @@ impl Translator<'_> {
                 return Ok(reason);
             }
             StopReason::Cancelled | StopReason::ContextFull => return Ok(reason),
-            // Keep the text up to the end of the cycle's first occurrence.
+            // Keep the text worth keeping (see `StopReason::Repetition`).
             StopReason::Repetition { kept } => self.truncate(start + kept),
             // Keep the output, which ends wherever the limit cut it. (Backends never report
-            // Incomplete; only whole chunks are checked for it.)
+            // Incomplete.)
             StopReason::LengthLimit | StopReason::Incomplete => {}
         }
         self.total.cut += 1;
         (self.on_progress)(Progress::Cut { index, reason });
         Ok(StopReason::Finished)
+    }
+}
+
+/// How finely a retried text is split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Level {
+    Chunk,
+    /// Pieces of up to [`RETRY_PIECE_TOKENS`] tokens, at the same boundaries as chunks.
+    Piece,
+    Sentence,
+}
+
+impl Level {
+    fn smaller(self) -> Option<Self> {
+        match self {
+            Self::Chunk => Some(Self::Piece),
+            Self::Piece => Some(Self::Sentence),
+            Self::Sentence => None,
+        }
     }
 }
 
@@ -824,6 +857,32 @@ mod tests {
         assert!(!looks_incomplete(150, 10));
         assert!(!looks_incomplete(400, 100));
         assert!(looks_incomplete(400, 99));
+    }
+
+    #[test]
+    fn retries_in_pieces_then_sentences() {
+        let mut backend = Upper::new();
+        let text = format!(
+            "{}.\n\n{}. LOOP {}.\n\n{}.",
+            "a".repeat(200),
+            "b".repeat(100),
+            "c".repeat(80),
+            "d".repeat(200)
+        );
+        let (out, stats, progress) = run(&mut backend, &chars, DocumentOptions::default(), &text);
+        assert_eq!(out, text.to_uppercase());
+        // The chunk, its second piece, and that piece's second sentence.
+        assert_eq!((stats.retries, stats.cut), (3, 0));
+        let retries: Vec<_> = progress
+            .iter()
+            .filter_map(|p| match p {
+                Progress::Retry { pieces, .. } => Some(*pieces),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(retries, [3, 2]);
+        // Chunk, piece 1, piece 2, its sentences 1 and 2, sentence 2 penalized, piece 3.
+        assert_eq!(backend.prompts.len(), 7);
     }
 
     #[test]

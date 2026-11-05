@@ -250,7 +250,7 @@ fn main() -> anyhow::Result<()> {
                 reason,
                 pieces,
             } => eprintln!(
-                "[chunk {}: {reason:?}, retrying in {pieces} sentences]",
+                "[chunk {}: {reason:?}, retrying in {pieces} pieces]",
                 index + 1
             ),
             Progress::Cut { index, reason } => {

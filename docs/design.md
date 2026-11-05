@@ -189,10 +189,14 @@ The first implementation is `LlamaCppBackend`:
   - A chunk of at least 200 tokens whose translation ends at under a quarter of its tokens counts as incomplete:
     large chunks often ended early and silently skipped the rest. It is retried like a loop.
   - Recovery:
-    1. A chunk whose output runs away (or is incomplete) is withdrawn (`Output::Truncate`, `Event::Rewind`) and translated again sentence by sentence.
-    2. A sentence that runs away again is retried with llama.cpp's DRY sampler (multiplier 0.8, base 1.75, allowed length 2), which penalizes the output repeating itself.
+    1. A chunk whose output runs away (or is incomplete) is withdrawn (`Output::Truncate`, `Event::Rewind`) and translated again in pieces of up to 256 tokens,
+       split at the same boundaries as chunks.
+    2. A piece that runs away again is translated sentence by sentence.
+       (Retrying a chunk sentence by sentence straight away needed dozens of prompts, each with the whole history: minutes on the CPU.)
+    3. A sentence that runs away again is retried with llama.cpp's DRY sampler (multiplier 0.8, base 1.75, allowed length 2), which penalizes the output repeating itself.
        DRY is not used otherwise, because it also discourages legitimate repetition.
-    3. If even that loops, the output is cut after the cycle's first occurrence.
+       A level that would not split the text further is skipped: the same input with the same history only repeats the same output.
+    4. If even that loops, the output is cut after the cycle's first occurrence.
        When the prompt contains the same cycle (text copied verbatim, such as repeated lines of code), as many repeats as the prompt has are kept:
        the model tends to copy such text and not stop, and only the repeats beyond the source's are the loop.
   - Output that ran away never enters the history, so one loop cannot seed the next.
