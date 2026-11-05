@@ -316,9 +316,17 @@ the auto-translate flag, the window geometry, and the license acceptance record.
   - Modules are loaded only from the executable's folder.
     - The build output directory is searched only when the executable runs from that cargo target directory (`cargo run`).
     - If nothing loads, start-up fails instead of letting `llama_backend_init` search ggml's default paths, which include the current directory.
-  - Linux: llama.cpp is linked statically and runs on the CPU only for now. With `dynamic-backends` on Linux,
-    llama-cpp-sys-2 copies the versioned `.so` symlinks without their targets, so the libraries need custom packaging.
-    That packaging is deferred to M5, and Linux users who want a GPU build it themselves with `--features engine/vulkan`.
+  - Linux: the same features as Windows.
+    - The executables get `RUNPATH=$ORIGIN` from build scripts, so they find `libllama.so.0`, `libggml.so.0`, and `libggml-base.so.0` next to themselves.
+      This is the executable's directory, never the current directory.
+    - llama-cpp-sys-2 copies the versioned `.so` symlinks into the target directory without their targets, so packaging copies the files they point to (`cp -L`).
+    - The package ships the Vulkan backend and the same five CPU variants as Windows.
+      On native Linux with a Vulkan driver, the discrete GPU is used.
+      WSL2 has no GPU Vulkan driver, so there the app uses the CPU, or the GPU through ROCm (`scripts/rocm.sh`).
+  - Packages use the `dist` profile (fat LTO, one codegen unit, stripped).
+    The Linux app binary is 34.5 MB this way, against 73.7 MB for a release build with llama.cpp linked statically.
+    Windows CI only builds this profile. Lints and tests run on Linux.
+  - The `translate` CLI is built and used for a smoke test (`--list-devices` with the package's own libraries), but it is not shipped.
 - Every CI run uploads the packaged builds as workflow artifacts.
 - A tag push publishes release artifacts (M5):
   - Windows: a portable zip with the exe, the DLLs and backend modules, and the licenses.

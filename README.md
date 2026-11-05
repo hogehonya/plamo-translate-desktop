@@ -36,8 +36,11 @@ PLaMo is a trademark of Preferred Networks, Inc.
 
 Windows (x86_64) and Linux (x86_64) builds are produced by GitHub Actions. Open a workflow run under **Actions** and download its artifacts.
 
-- **Windows**: unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it, because the CPU and Vulkan backends are loaded from there.
-- **Linux**: the build runs on the CPU only. It needs a Wayland or X11 session with a Vulkan driver (used for rendering) and a CJK font such as `fonts-noto-cjk`.
+- **Windows**: unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it: llama.cpp and its CPU and Vulkan backends are loaded from there, and only from there.
+- **Linux**: extract and run `plamo-translate-desktop`. The shared libraries next to it are found through the executable's own directory (`RUNPATH=$ORIGIN`).
+  It needs a Wayland or X11 session with a Vulkan driver, which the UI uses for rendering and translation can use on the GPU, and a CJK font such as `fonts-noto-cjk`.
+
+On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 
 ## Building from source
 
@@ -48,6 +51,14 @@ Linux (Ubuntu or Debian):
 ```sh
 sudo apt install cmake libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev
 cargo run -p plamo-translate-desktop --release
+```
+
+This development build runs on the CPU, with llama.cpp linked statically.
+Packages are built like CI does: with the size-optimized `dist` profile (fat LTO, stripped), Vulkan, and dynamically loaded backends.
+The Vulkan backend also needs `libvulkan-dev glslc spirv-headers`.
+
+```sh
+cargo build --profile dist -p plamo-translate-desktop --features engine/vulkan,engine/dynamic-backends
 ```
 
 On Linux (including WSL2) with an AMD GPU, the ROCm (HIP) backend runs the model on the GPU.
