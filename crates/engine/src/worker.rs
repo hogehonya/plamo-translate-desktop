@@ -48,11 +48,13 @@ pub enum Event {
     LoadFailed(String),
     /// The model was released after an unload request; its file is no longer open.
     Unloaded,
-    /// A long text was split; chunk `index` of `count` is starting.
+    /// A long text was split; chunk `index` of `count` is starting. `source` is its byte range
+    /// in the text.
     Chunk {
         job: JobId,
         index: usize,
         count: usize,
+        source: (usize, usize),
     },
     /// Generated text for a job, in order.
     Token {
@@ -270,7 +272,16 @@ fn serve(
                 Output::Truncate(len) => events(Event::Rewind { job, len }),
             },
             &mut |progress| match progress {
-                Progress::Chunk { index, count, .. } => events(Event::Chunk { job, index, count }),
+                Progress::Chunk {
+                    index,
+                    count,
+                    source,
+                } => events(Event::Chunk {
+                    job,
+                    index,
+                    count,
+                    source,
+                }),
                 Progress::Retry { index, reason, .. } => {
                     events(Event::Retry { job, index, reason })
                 }

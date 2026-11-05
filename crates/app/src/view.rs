@@ -49,6 +49,29 @@ const COPY_TRANSLATION_KEY: &str = "cmd-shift-c";
 #[cfg(not(target_os = "macos"))]
 const COPY_TRANSLATION_KEY: &str = "ctrl-shift-c";
 
+/// A duration for the status bar, such as `45 s`, `3 min 20 s`, or `1 h 05 min`.
+fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs_f64().round() as u64;
+    if secs < 60 {
+        t!("time.seconds", s = secs).into_owned()
+    } else if secs < 3600 {
+        t!(
+            "time.minutes",
+            m = secs / 60,
+            s = format!("{:02}", secs % 60)
+        )
+        .into_owned()
+    } else {
+        let minutes = secs / 60;
+        t!(
+            "time.hours",
+            h = minutes / 60,
+            m = format!("{:02}", minutes % 60)
+        )
+        .into_owned()
+    }
+}
+
 /// `n` with thousands separators, such as `12,345`.
 fn group_digits(n: usize) -> String {
     let digits = n.to_string();
@@ -104,6 +127,15 @@ type UiLanguageSelect = SelectState<Vec<Choice<UiLanguage>>>;
 type ThemeSelect = SelectState<Vec<Choice<ThemeSetting>>>;
 type TokensSelect = SelectState<Vec<Choice<usize>>>;
 
+/// The chunk of a long text being translated: its byte range in the source, and how many
+/// tokens had been generated when it started.
+#[derive(Debug, Clone, Copy)]
+struct ChunkMark {
+    start: usize,
+    end: usize,
+    tokens_before: usize,
+}
+
 /// What the window shows about the source text. Computing it scans the whole text, which is
 /// too slow to do on every frame for a long document.
 #[derive(Debug, Clone, Copy)]
@@ -151,6 +183,8 @@ enum Status {
     Done {
         /// Generated tokens, including output that was withdrawn and translated again.
         tokens: usize,
+        /// From the request to the end of the translation.
+        elapsed: Duration,
         tokens_per_second: f64,
         /// Passages whose output kept looping and was cut.
         cut: usize,
@@ -207,6 +241,10 @@ pub struct TranslatorView {
     /// Tokens received for the current job, and when the first one arrived (for the live rate).
     stream_tokens: usize,
     stream_started: Option<Instant>,
+    /// When the current job was submitted.
+    job_started: Option<Instant>,
+    /// The chunk being translated, for the remaining-time estimate.
+    current_chunk: Option<ChunkMark>,
 
     /// Set by the paste hook so the following change translates without debouncing.
     paste_pending: bool,
@@ -460,6 +498,8 @@ impl TranslatorView {
             cache: VecDeque::new(),
             stream_tokens: 0,
             stream_started: None,
+            job_started: None,
+            current_chunk: None,
             paste_pending: false,
             copied: false,
             debounce: Task::ready(()),
@@ -952,6 +992,8 @@ impl TranslatorView {
         ));
         self.stream_tokens = 0;
         self.stream_started = None;
+        self.job_started = Some(Instant::now());
+        self.current_chunk = None;
         self.shown = Some(request);
         self.status = Status::Translating {
             target,
@@ -1117,10 +1159,20 @@ impl TranslatorView {
                 self.translate_now(window, cx);
             }
             Event::LoadFailed(e) | Event::RuntimeFailed(e) => self.status = Status::Error(e),
-            Event::Chunk { job, index, count } if is_current(job) => {
+            Event::Chunk {
+                job,
+                index,
+                count,
+                source: (start, end),
+            } if is_current(job) => {
                 if let Status::Translating { chunk, .. } = &mut self.status {
                     *chunk = (count > 1).then_some((index + 1, count));
                 }
+                self.current_chunk = Some(ChunkMark {
+                    start,
+                    end,
+                    tokens_before: self.stream_tokens,
+                });
             }
             Event::Token { job, text } if is_current(job) => {
                 self.append_translation(&text, window, cx);
@@ -1152,6 +1204,7 @@ impl TranslatorView {
                         }
                         Status::Done {
                             tokens: stats.generated_tokens,
+                            elapsed: self.job_started.map_or(Duration::ZERO, |t| t.elapsed()),
                             tokens_per_second: stats.generation_tokens_per_second(),
                             cut: stats.cut,
                         }
@@ -1251,6 +1304,27 @@ impl TranslatorView {
         self.translate_now(window, cx);
     }
 
+    /// Estimated time until the running job finishes, once a chunk of a long text is done.
+    ///
+    /// Progress is measured in source bytes. The chunk in progress counts in proportion to its
+    /// output so far, against what the finished chunks produced per source byte.
+    fn remaining_time(&self) -> Option<Duration> {
+        let chunk = self.current_chunk?;
+        let total = self.shown.as_ref()?.text.len();
+        let elapsed = self.job_started?.elapsed().as_secs_f64();
+        if chunk.start == 0 || total == 0 || elapsed < 1.0 {
+            return None;
+        }
+        let tokens_per_byte = chunk.tokens_before as f64 / chunk.start as f64;
+        let chunk_len = (chunk.end - chunk.start) as f64;
+        let chunk_tokens = (self.stream_tokens - chunk.tokens_before) as f64;
+        // Never count the chunk as finished before it is.
+        let chunk_done = (chunk_tokens / (chunk_len * tokens_per_byte).max(1.0)).min(0.95);
+        let done = chunk.start as f64 + chunk_len * chunk_done;
+        let remaining = (total as f64 - done).max(0.0) * elapsed / done;
+        Some(Duration::from_secs_f64(remaining))
+    }
+
     /// Generation rate of the running job, measured from the first received token.
     /// It includes prompt processing between chunks of a long text.
     fn live_tokens_per_second(&self) -> Option<f64> {
@@ -1280,25 +1354,32 @@ impl TranslatorView {
                 if let Some(rate) = self.live_tokens_per_second() {
                     text.push_str(&format!(" · {rate:.1} tok/s"));
                 }
+                if let Some(eta) = self.remaining_time() {
+                    let eta = t!("status.remaining", time = format_duration(eta));
+                    text.push_str(&format!(" · {eta}"));
+                }
                 text
             }
             Status::Done {
                 tokens,
+                elapsed,
                 tokens_per_second,
                 cut,
             } => {
                 let speed = format!("{tokens_per_second:.1}");
                 let tokens = group_digits(*tokens);
+                let time = format_duration(*elapsed);
                 if *cut > 0 {
                     t!(
                         "status.done_cut",
                         tokens = tokens,
                         speed = speed,
+                        time = time,
                         count = cut
                     )
                     .into_owned()
                 } else {
-                    t!("status.done", tokens = tokens, speed = speed).into_owned()
+                    t!("status.done", tokens = tokens, speed = speed, time = time).into_owned()
                 }
             }
             Status::Cached => t!("status.cached").into_owned(),

@@ -82,12 +82,24 @@ status.translating:
 status.tokens:
   en: "%{count} tokens"
   ja: "%{count} トークン"
+status.remaining:
+  en: "about %{time} left"
+  ja: "残り約 %{time}"
 status.done:
-  en: "Done · %{tokens} tokens · %{speed} tok/s"
-  ja: "完了 · %{tokens} トークン · %{speed} tok/s"
+  en: "Done in %{time} · %{tokens} tokens · %{speed} tok/s"
+  ja: "完了（%{time}） · %{tokens} トークン · %{speed} tok/s"
 status.done_cut:
-  en: "Done · %{tokens} tokens · %{speed} tok/s · %{count} passage(s) kept repeating and were cut"
-  ja: "完了 · %{tokens} トークン · %{speed} tok/s · 繰り返しが止まらなかった %{count} か所を打ち切りました"
+  en: "Done in %{time} · %{tokens} tokens · %{speed} tok/s · %{count} passage(s) kept repeating and were cut"
+  ja: "完了（%{time}） · %{tokens} トークン · %{speed} tok/s · 繰り返しが止まらなかった %{count} か所を打ち切りました"
+time.seconds:
+  en: "%{s} s"
+  ja: "%{s} 秒"
+time.minutes:
+  en: "%{m} min %{s} s"
+  ja: "%{m} 分 %{s} 秒"
+time.hours:
+  en: "%{h} h %{m} min"
+  ja: "%{h} 時間 %{m} 分"
 status.cached:
   en: Done (cached)
   ja: 完了（キャッシュ）
