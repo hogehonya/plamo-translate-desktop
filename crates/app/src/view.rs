@@ -164,13 +164,7 @@ fn browser_settings(
                 .child(div().flex_none().child(toggle))
                 .children(open_folder.map(|button| div().flex_none().child(button))),
         )
-        .children(elsewhere.map(|path| {
-            div()
-                .text_xs()
-                .text_color(muted)
-                .min_w_0()
-                .child(path)
-        }))
+        .children(elsewhere.map(|path| div().text_xs().text_color(muted).min_w_0().child(path)))
         .children(error.map(|e| {
             div()
                 .text_xs()
