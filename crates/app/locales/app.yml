@@ -79,12 +79,15 @@ status.ready:
 status.translating:
   en: "Translating into %{lang}…"
   ja: "%{lang}に翻訳中…"
+status.tokens:
+  en: "%{count} tokens"
+  ja: "%{count} トークン"
 status.done:
-  en: "Done · %{speed} tok/s"
-  ja: "完了 · %{speed} tok/s"
+  en: "Done · %{tokens} tokens · %{speed} tok/s"
+  ja: "完了 · %{tokens} トークン · %{speed} tok/s"
 status.done_cut:
-  en: "Done · %{speed} tok/s · %{count} passage(s) kept repeating and were cut"
-  ja: "完了 · %{speed} tok/s · 繰り返しが止まらなかった %{count} か所を打ち切りました"
+  en: "Done · %{tokens} tokens · %{speed} tok/s · %{count} passage(s) kept repeating and were cut"
+  ja: "完了 · %{tokens} トークン · %{speed} tok/s · 繰り返しが止まらなかった %{count} か所を打ち切りました"
 status.cached:
   en: Done (cached)
   ja: 完了（キャッシュ）

@@ -49,6 +49,19 @@ const COPY_TRANSLATION_KEY: &str = "cmd-shift-c";
 #[cfg(not(target_os = "macos"))]
 const COPY_TRANSLATION_KEY: &str = "ctrl-shift-c";
 
+/// `n` with thousands separators, such as `12,345`.
+fn group_digits(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Chunk and history size options for the settings dialog.
 fn token_choices(document: &DocumentSettings) -> (Vec<Choice<usize>>, Vec<Choice<usize>>) {
     let defaults = DocumentSettings::default();
@@ -136,6 +149,8 @@ enum Status {
         chunk: Option<(usize, usize)>,
     },
     Done {
+        /// Generated tokens, including output that was withdrawn and translated again.
+        tokens: usize,
         tokens_per_second: f64,
         /// Passages whose output kept looping and was cut.
         cut: usize,
@@ -1136,6 +1151,7 @@ impl TranslatorView {
                             self.remember(request, self.translation.clone());
                         }
                         Status::Done {
+                            tokens: stats.generated_tokens,
                             tokens_per_second: stats.generation_tokens_per_second(),
                             cut: stats.cut,
                         }
@@ -1257,20 +1273,32 @@ impl TranslatorView {
                 if let Some((current, total)) = chunk {
                     text.push_str(&format!(" ({current}/{total})"));
                 }
+                if self.stream_tokens > 0 {
+                    let tokens = t!("status.tokens", count = group_digits(self.stream_tokens));
+                    text.push_str(&format!(" · {tokens}"));
+                }
                 if let Some(rate) = self.live_tokens_per_second() {
                     text.push_str(&format!(" · {rate:.1} tok/s"));
                 }
                 text
             }
             Status::Done {
+                tokens,
                 tokens_per_second,
                 cut,
             } => {
                 let speed = format!("{tokens_per_second:.1}");
+                let tokens = group_digits(*tokens);
                 if *cut > 0 {
-                    t!("status.done_cut", speed = speed, count = cut).into_owned()
+                    t!(
+                        "status.done_cut",
+                        tokens = tokens,
+                        speed = speed,
+                        count = cut
+                    )
+                    .into_owned()
                 } else {
-                    t!("status.done", speed = speed).into_owned()
+                    t!("status.done", tokens = tokens, speed = speed).into_owned()
                 }
             }
             Status::Cached => t!("status.cached").into_owned(),
@@ -1547,7 +1575,15 @@ mod tests {
     // Import explicitly: `gpui_kit::*` exports a `test` macro that would shadow `#[test]`.
     use std::path::Path;
 
-    use super::model_label;
+    use super::{group_digits, model_label};
+
+    #[test]
+    fn groups_digits() {
+        assert_eq!(group_digits(0), "0");
+        assert_eq!(group_digits(999), "999");
+        assert_eq!(group_digits(1000), "1,000");
+        assert_eq!(group_digits(1234567), "1,234,567");
+    }
 
     #[test]
     fn labels_standard_model_files() {
