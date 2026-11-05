@@ -21,7 +21,7 @@ jobs:
     name: Linux (CPU, static)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -48,7 +48,7 @@ jobs:
           cp target/release/plamo-translate-desktop target/release/examples/translate "$dist/"
           tar -C dist -czf plamo-translate-desktop-linux-x86_64.tar.gz plamo-translate-desktop
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: plamo-translate-desktop-linux-x86_64
           path: plamo-translate-desktop-linux-x86_64.tar.gz
@@ -62,7 +62,7 @@ jobs:
       CARGO_TARGET_DIR: D:\t
       FEATURES: engine/vulkan,engine/dynamic-backends
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Vulkan SDK
         shell: pwsh
@@ -80,12 +80,20 @@ jobs:
         with:
           components: clippy
 
-      - uses: actions/cache@v4
+      # The llama-cpp-rs git dependency checks out llama.cpp as a submodule, which contains
+      # paths over 230 characters. A short CARGO_HOME keeps them under MAX_PATH.
+      - name: Shorten Cargo paths
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          "CARGO_HOME=D:\c" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - uses: actions/cache@v6
         with:
           path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
+            D:\c\registry\index
+            D:\c\registry\cache
+            D:\c\git\db
             D:\t
           key: windows-${{ env.VULKAN_VERSION }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: windows-${{ env.VULKAN_VERSION }}-
@@ -111,7 +119,7 @@ jobs:
           Get-ChildItem $dist | Format-Table Name, Length
           Compress-Archive -Path $dist -DestinationPath plamo-translate-desktop-windows-x86_64.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: plamo-translate-desktop-windows-x86_64
           path: plamo-translate-desktop-windows-x86_64.zip
