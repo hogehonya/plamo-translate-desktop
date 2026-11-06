@@ -202,15 +202,7 @@ function onMessage(message) {
       if (currentId === true) currentId = message.id;
       return;
     case "page_failed":
-      // Without the activeTab grant (the context menu or the toolbar button gives it), the
-      // page can be reached only with permission for its site.
-      showNotice(
-        () => t("pageNotAllowed"),
-        () => t("allowAllSites"),
-        async () => {
-          if (await chrome.permissions.request({ origins: ["<all_urls>"] })) translatePage();
-        },
-      );
+      pageFailed(message.message);
       return;
     case "page_started":
       return;
@@ -264,6 +256,31 @@ function errorText(message) {
     default:
       return t("errorFailed", message.message ?? message.code);
   }
+}
+
+/**
+ * Explains why page.js could not be injected, offering the permission for all sites when it
+ * would help.
+ */
+async function pageFailed(error) {
+  // The extension may enter a tab after the toolbar button or the context menu was used on it
+  // (activeTab), until the tab goes to another site; buttons in the panel do not grant that.
+  // Other tabs need the permission for their site. Browser pages, the extension stores, and
+  // error pages cannot be entered at all.
+  const all = { origins: ["<all_urls>"] };
+  const permissionHelps =
+    /must request permission/i.test(error ?? "") && !(await chrome.permissions.contains(all).catch(() => false));
+  if (!permissionHelps) {
+    showNotice(() => t("pageCannotTranslate"));
+    return;
+  }
+  showNotice(
+    () => t("pageNotAllowed"),
+    () => t("allowAllSites"),
+    async () => {
+      if (await chrome.permissions.request(all)) translatePage();
+    },
+  );
 }
 
 /** Whether the host could not be started: not registered, or the app was moved. */

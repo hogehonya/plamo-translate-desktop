@@ -15,6 +15,11 @@
     <div id="status" class="status"></div>
     <!-- At the top: the controls below it belong to the text box. -->
     <button id="translatePage" class="page-button" data-i18n="translatePage" data-i18n-title="translatePageTitle"></button>
+    <!-- Under the page button, whose failures it explains, and in view whatever the panel shows. -->
+    <div id="notice" class="notice" hidden>
+      <span id="noticeText"></span>
+      <button id="noticeAction" class="small" hidden></button>
+    </div>
 
     <details id="settings">
       <summary data-i18n="settings"></summary>
@@ -38,11 +43,6 @@
       <button id="copy" class="small" data-i18n="copy" disabled></button>
     </div>
     <div id="output" class="output" aria-live="polite"></div>
-
-    <div id="notice" class="notice" hidden>
-      <span id="noticeText"></span>
-      <button id="noticeAction" class="small" hidden></button>
-    </div>
 
     <footer data-i18n="builtWith"></footer>
     <script src="i18n.js"></script>

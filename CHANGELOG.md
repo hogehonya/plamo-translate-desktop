@@ -2,6 +2,13 @@
 
 All notable changes to PLaMo Translate Desktop. Each release's section here also becomes its release notes on GitHub.
 
+## [Unreleased]
+
+### Fixed
+
+- Translate this page in the extension's panel seemed to do nothing at times. The browser lets the panel into a tab only after the toolbar button or the right-click menu was used on it, so the button fails on other tabs, such as after switching tabs or going to another site. The explanation now shows right under the button instead of at the bottom of the panel, and offers to allow the extension on all sites only where that helps: pages that extensions cannot enter, such as the browser's own pages, now say so.
+- Asking again to translate a page that is translated already now shows its box again (it stayed hidden if it was closed).
+
 ## [0.2.0] - 2026-11-06
 
 ### Added
@@ -32,5 +39,6 @@ The first release.
 - English and Japanese UI, light and dark themes, and synchronized scrolling between the source and the translation.
 - Packages for Windows and Linux (x86-64), with third-party notices.
 
+[Unreleased]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/tanakh/plamo-translate-desktop/releases/tag/v0.1.0

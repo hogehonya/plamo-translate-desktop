@@ -393,7 +393,9 @@
     }
     if (target !== "ja") style = "";
     send(collect(document.body), true);
-    if (!total) render(t("pageNothing"));
+    // Also when nothing new was sent (the page is translated already), so that the box shows
+    // again, even if it was closed: the request was not ignored.
+    render(total ? undefined : t("pageNothing"));
     // Paragraphs added later (infinite scrolling, expanding sections).
     observer?.disconnect();
     let timer = null;

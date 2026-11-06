@@ -476,6 +476,10 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 - Closing the port ends the host and frees the model's memory and the app's files (which Windows keeps locked while the host runs).
   The next request starts it again.
 - Page translation (`page.js`, injected on request with `activeTab`, or from the panel with the optional all-sites permission):
+  - Buttons in the side panel do not grant `activeTab` (the toolbar button and the context menu do), so the panel reaches a tab only after one of those was used on it,
+    until the tab goes to another site. When the injection fails for want of a host permission, the panel offers the all-sites permission unless it is granted already;
+    other failures (browser pages, the extension stores, error pages) say that the page cannot be translated. The notice sits under the page button.
+  - Injecting into a page that has `page.js` already starts it again; it sends only runs not sent yet, and shows its box again even when there are none.
   - The page is cut into runs: consecutive text and inline elements within one block. Code, line breaks, and text marked `translate="no"`
     or `notranslate` stay as they are inside a run; `pre`, form controls, scripts, and similar are skipped, as are Japanese runs for a Japanese target (not for easy Japanese, which rewrites them).
   - A run is sent as simple HTML whose elements carry an index instead of their attributes (`see the <a i="2">guide</a>`).

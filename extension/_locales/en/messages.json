@@ -215,10 +215,13 @@
     }
   },
   "pageNotAllowed": {
-    "message": "This page cannot be translated from the panel without permission. Right-click the page and choose \"Translate this page with PLaMo\", or allow the extension on all sites."
+    "message": "The browser lets the panel translate only a tab where the toolbar button or the right-click menu was used, until it goes to another site. Right-click this page and choose \"Translate this page with PLaMo\", or allow the extension on all sites."
   },
   "allowAllSites": {
     "message": "Allow on all sites"
+  },
+  "pageCannotTranslate": {
+    "message": "This page cannot be translated: the browser does not let extensions run on it (browser pages, extension stores, error pages, and the like)."
   },
   "statusReleasedIdle": {
     "message": "Released (unused for 5 minutes)"
