@@ -25,7 +25,7 @@ let engine = "app";
 // The model and device chosen here for each engine, by storage key ("" is the default: the
 // app's choice, or the first model downloaded); the background sends them whenever it starts
 // the engine.
-const choices = { choices: { model: "", device: "" }, browserChoices: { model: "", device: "" } };
+const choices = { choices: { model: "", device: "" }, browserChoices: { model: "", device: "", threads: 0 } };
 const choiceKey = () => (engine === "browser" ? "browserChoices" : "choices");
 /** The in-browser engine's downloads, by model: its latest `download` message. */
 const downloads = {};
@@ -72,12 +72,13 @@ chrome.storage.local.onChanged.addListener(async (changes) => {
   $("uiLanguage").value = uiLanguage;
 });
 
-for (const id of ["model", "device"]) {
+for (const id of ["model", "device", "threads"]) {
   $(id).addEventListener("change", () => {
     const key = choiceKey();
-    choices[key][id] = $(id).value;
+    choices[key][id] = id === "threads" ? Number($(id).value) || 0 : $(id).value;
     chrome.storage.local.set({ [key]: choices[key] });
-    send({ type: "configure", model: choices[key].model || undefined, device: choices[key].device || undefined });
+    const { model, device, threads } = choices[key];
+    send({ type: "configure", model: model || undefined, device: device || undefined, threads: threads || undefined });
   });
 }
 
@@ -407,6 +408,7 @@ function renderOptions(options) {
     return;
   }
   $("browserModels").hidden = true;
+  $("threadsRow").hidden = true;
   const model = $("model");
   model.replaceChildren(new Option(t("followApp", options.app_model ?? t("none")), ""));
   for (const m of options.models) model.add(new Option(`${m.label} (${gb(m.bytes)})`, m.id));
@@ -436,6 +438,14 @@ function renderBrowserOptions(options) {
   device.replaceChildren(new Option(t("deviceAutoMeasured"), ""));
   for (const d of options.devices) device.add(new Option(`${d.name.toUpperCase()} — ${d.description}`, d.name));
   device.value = options.device && options.device !== "auto" ? options.device : "";
+  // Thread counts for the CPU: powers of two up to the logical cores, and the cores.
+  const counts = [];
+  for (let n = 1; n < options.cores; n *= 2) counts.push(n);
+  if (options.cores) counts.push(options.cores);
+  const threads = $("threads");
+  threads.replaceChildren(new Option(t("threadsAuto"), ""), ...counts.map((n) => new Option(String(n), String(n))));
+  threads.value = options.threads ? String(options.threads) : "";
+  $("threadsRow").hidden = false;
   renderBrowserModels();
 }
 
@@ -495,7 +505,7 @@ function renderEngineTexts() {
 function renderStatus(status) {
   shownStatus = status;
   if (status.engine) engine = status.engine;
-  let model = [status.model, status.device].filter(Boolean).join(" · ");
+  let model = [status.model, status.device, status.threads && t("threadsCount", String(status.threads))].filter(Boolean).join(" · ");
   if (engine === "browser" && model) model = t("statusInBrowser", model);
   $("release").disabled = status.state === "released" || status.state === "disconnected";
   switch (status.state) {

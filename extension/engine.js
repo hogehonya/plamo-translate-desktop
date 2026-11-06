@@ -61,8 +61,8 @@ URL.createObjectURL = (object) =>
 const port = chrome.runtime.connect({ name: "engine" });
 const post = (message) => port.postMessage(message);
 
-/** The extension's choices ("" or absent: the default). */
-let settings = { model: "", device: "auto" };
+/** The extension's choices ("" or absent: the default; 0 threads: wllama's default). */
+let settings = { model: "", device: "auto", threads: 0 };
 /** The model in use: { model, device, wllama }, or null. */
 let loaded = null;
 /** Settles when the current load (or measurement) ends. */
@@ -200,7 +200,7 @@ async function measure() {
 // ---- Loading ----
 
 async function load(model, device) {
-  if (loaded?.model === model && loaded.device === device) return;
+  if (loaded?.model === model && loaded.device === device && loaded.requestedThreads === settings.threads) return;
   await unload();
   setStatus({ state: "loading", model: model.label, device: device === "gpu" ? "WebGPU" : "CPU" });
   const file = await (await (await modelsDir()).getFileHandle(fileName(model))).getFile();
@@ -212,12 +212,23 @@ async function load(model, device) {
     logger: { debug: keep, log: keep, info: keep, warn: keep, error: (...args) => (keep(...args), console.error(...args)) },
   });
   try {
-    await wllama.loadModel([file], { n_ctx: N_CTX, n_gpu_layers: device === "gpu" ? 999 : 0 });
+    await wllama.loadModel([file], {
+      n_ctx: N_CTX,
+      n_gpu_layers: device === "gpu" ? 999 : 0,
+      ...(settings.threads > 0 ? { n_threads: settings.threads } : {}),
+    });
   } catch (e) {
     await wllama.exit().catch(() => {});
     throw e;
   }
-  loaded = { model, device, wllama, gpu: device === "gpu" ? usedGpu(lines) : null };
+  loaded = {
+    model,
+    device,
+    wllama,
+    gpu: device === "gpu" ? usedGpu(lines) : null,
+    requestedThreads: settings.threads,
+    threads: wllama.getNumThreads(),
+  };
   if (device === "gpu" && !loaded.gpu) console.warn("WebGPU was not used:", lines.filter((l) => /webgpu|offload/i.test(l)).join("\n"));
 }
 
@@ -279,7 +290,14 @@ async function ensureLoaded() {
   try {
     await loading;
     // `gpuUnavailable`: WebGPU was chosen (or measured) but llama.cpp could not use it.
-    setStatus({ state: "ready", model: model.label, device: deviceLabel(), gpuUnavailable: loaded.device === "gpu" && !loaded.gpu });
+    setStatus({
+      state: "ready",
+      model: model.label,
+      device: deviceLabel(),
+      // The CPU's threads, which the panel shows.
+      threads: loaded.gpu ? undefined : loaded.threads,
+      gpuUnavailable: loaded.device === "gpu" && !loaded.gpu,
+    });
   } catch (e) {
     setStatus({ state: "error", model: model.label, message: String(e?.message ?? e) });
     throw Object.assign(new Error(String(e?.message ?? e)), { code: "load_failed" });
@@ -415,6 +433,9 @@ async function sendOptions() {
     ],
     model: settings.model || null,
     device: settings.device || null,
+    // The thread counts to choose from go up to the logical cores.
+    cores: navigator.hardwareConcurrency,
+    threads: settings.threads || null,
   });
 }
 
@@ -423,9 +444,14 @@ async function sendOptions() {
 port.onMessage.addListener(async (message) => {
   switch (message.type) {
     case "configure":
-      settings = { model: message.model ?? "", device: message.device ?? "auto" };
+      settings = { model: message.model ?? "", device: message.device ?? "auto", threads: Number(message.threads) || 0 };
       // The next translation loads what is chosen now.
-      if (loaded && (loaded.model.id !== (await selectedModel())?.id || (settings.device !== "auto" && settings.device !== loaded.device))) {
+      if (
+        loaded &&
+        (loaded.model.id !== (await selectedModel())?.id ||
+          (settings.device !== "auto" && settings.device !== loaded.device) ||
+          (!loaded.gpu && settings.threads !== loaded.requestedThreads))
+      ) {
         await unload();
       }
       sendStatus();

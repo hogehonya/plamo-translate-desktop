@@ -124,7 +124,12 @@ function connectHost() {
     const key = kind === "browser" ? "browserChoices" : "choices";
     const { [key]: choices } = await chrome.storage.local.get({ [key]: {} }).catch(() => ({ [key]: {} }));
     if (host === connection) {
-      port.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+      port.postMessage({
+        type: "configure",
+        model: choices.model || undefined,
+        device: choices.device || undefined,
+        threads: choices.threads || undefined,
+      });
     }
   })().catch((e) => {
     if (host !== connection) return;
@@ -231,6 +236,8 @@ function onBatchMessage(job, message) {
     }
     return;
   }
+  // The batch starts once the model is loaded: the speed leaves the loading out.
+  if (message.type === "started") job.startedAt = performance.now();
   if (message.type !== "done" && message.type !== "error") return;
   if (!page || job.cancelled) return;
   if (message.type === "error") {
@@ -238,6 +245,9 @@ function onBatchMessage(job, message) {
     page.port.postMessage({ type: "error", code: message.code, message: message.message });
     return;
   }
+  // The batch's speed, prompts included, for the box on the page.
+  const seconds = (performance.now() - job.startedAt) / 1000;
+  if (message.tokens > 0 && seconds > 0) page.port.postMessage({ type: "speed", tokensPerSecond: message.tokens / seconds });
   const undone = job.items.filter((item) => !item.done);
   if (undone.length && !message.cancelled) {
     // Cut short otherwise; the same batch would stop again. Resume in the page tries again.
@@ -276,7 +286,7 @@ function schedule() {
       chars += item.text.length;
       items.push(item);
     }
-    active = { id: nextId++, kind: "page", tabId, items, cancelled: false };
+    active = { id: nextId++, kind: "page", tabId, items, cancelled: false, startedAt: performance.now() };
     jobs.set(active.id, active);
     sendHost({
       type: "translate_segments",

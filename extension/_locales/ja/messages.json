@@ -530,5 +530,19 @@
   },
   "resetSettingsConfirm": {
     "message": "拡張機能の設定を初期化しますか？ ライセンスへの同意とデバイスの測定結果も消えます。ダウンロード済みのモデルは残ります。"
+  },
+  "threads": {
+    "message": "スレッド数"
+  },
+  "threadsAuto": {
+    "message": "自動"
+  },
+  "threadsCount": {
+    "message": "$COUNT$ スレッド",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }
