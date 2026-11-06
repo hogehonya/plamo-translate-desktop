@@ -1,6 +1,6 @@
 # PLaMo Translate Desktop — Design
 
-Status: describes the code after v0.2.1 (released 2026-11-06), towards v0.3.0. Update it together with the code.
+Status: describes the code as of v0.3.0 (released 2026-11-06). Update it together with the code.
 
 ## 1. Goal
 
@@ -541,7 +541,7 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2), device selection (M3),
 translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
 Then v0.2.0 (2026-11-06): the browser extension (§12); v0.2.1: clearer failures of page translation from the panel.
-Towards v0.3.0: Intel NPUs through OpenVINO (§8).
+v0.3.0: Intel NPUs through OpenVINO, and automatic device selection that measures the devices (§8).
 
 Possible later work:
 
