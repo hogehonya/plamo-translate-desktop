@@ -115,6 +115,10 @@ $("licenseLink").addEventListener("click", (e) => {
   e.preventDefault();
   chrome.tabs.create({ url: t("licenseUrl") });
 });
+$("appGuide").addEventListener("click", (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: t("appGuideUrl") });
+});
 $("licenseAccept").addEventListener("click", () => {
   licenseAccepted = true;
   chrome.storage.local.set({ licenseAccepted });
@@ -555,6 +559,8 @@ function renderBrowserModels() {
 /** Texts that depend on the engine in use. */
 function renderEngineTexts() {
   $("settingsHint").textContent = t(engine === "browser" ? "settingsHintBrowser" : "settingsHint");
+  $("appGuide").hidden = engine !== "browser";
+  $("appGuide").href = t("appGuideUrl");
   $("release").title = t(engine === "browser" ? "releaseTitleBrowser" : "releaseTitle");
   $("licenseLink").href = t("licenseUrl");
 }

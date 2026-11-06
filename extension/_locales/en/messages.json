@@ -622,5 +622,13 @@
   "statusMeasuringAgain": {
     "message": "Measuring the GPU and the CPU…",
     "description": "Status while measuring again from the button"
+  },
+  "appGuide": {
+    "message": "How to set up the app",
+    "description": "Link after the in-browser engine's hint, to the README's steps for the app and the extension"
+  },
+  "appGuideUrl": {
+    "message": "https://github.com/tanakh/plamo-translate-desktop#browser-extension",
+    "description": "The README section on the browser extension, in this language"
   }
 }

@@ -622,5 +622,13 @@
   "statusMeasuringAgain": {
     "message": "GPU と CPU の速さを測っています…",
     "description": "Status while measuring again from the button"
+  },
+  "appGuide": {
+    "message": "アプリの導入方法",
+    "description": "Link after the in-browser engine's hint, to the README's steps for the app and the extension"
+  },
+  "appGuideUrl": {
+    "message": "https://github.com/tanakh/plamo-translate-desktop/blob/main/README.ja.md#%E3%83%96%E3%83%A9%E3%82%A6%E3%82%B6%E6%8B%A1%E5%BC%B5",
+    "description": "The README section on the browser extension, in this language"
   }
 }

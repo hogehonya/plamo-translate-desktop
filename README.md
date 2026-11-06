@@ -75,6 +75,7 @@ On a PC with an integrated GPU and no discrete one, the first model load measure
 ## Browser extension
 
 The packages include an extension for Chrome and Edge (`browser-extension/`) that translates text in the browser with the model selected in the app.
+Install the app first (see [Download](#download)), then:
 
 1. In the app, open Settings (the gear in the status bar) and choose **Connect** under Browser extension.
    This registers the bundled `plamo-translate-host` with Chrome and Edge (on Linux also Chromium and Brave).

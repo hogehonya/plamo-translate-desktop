@@ -43,7 +43,8 @@
       <label id="threadsRow" hidden><span data-i18n="threads"></span><select id="threads"></select></label>
       <label><span data-i18n="pageMode"></span><select id="pageMode"></select></label>
       <label><span data-i18n="uiLanguage"></span><select id="uiLanguage"></select></label>
-      <p class="hint" id="settingsHint"></p>
+      <!-- In the browser, a link to setting up the app, which the larger models need. -->
+      <p class="hint"><span id="settingsHint"></span> <a id="appGuide" href="#" hidden data-i18n="appGuide"></a></p>
       <!-- Back to a first start, for example to see the license notice again. -->
       <p><button id="resetSettings" class="small" data-i18n="resetSettings"></button></p>
     </details>
