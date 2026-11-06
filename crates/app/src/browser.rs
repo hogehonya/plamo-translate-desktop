@@ -205,8 +205,7 @@ mod platform {
     /// `~/Library/Application Support`. Browsers on macOS ignore `$XDG_CONFIG_HOME`.
     #[cfg(target_os = "macos")]
     fn config_dir() -> Option<PathBuf> {
-        std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join("Library/Application Support"))
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
     }
 
     fn manifest_file(browser_dir: &str) -> Option<PathBuf> {
@@ -274,7 +273,8 @@ mod platform {
                 "google-chrome/NativeMessagingHosts"
             };
             assert!(
-                chrome.ends_with(Path::new(expected).join("com.github.tanakh.plamo_translate.json")),
+                chrome
+                    .ends_with(Path::new(expected).join("com.github.tanakh.plamo_translate.json")),
                 "{}",
                 chrome.display()
             );

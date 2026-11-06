@@ -6,7 +6,8 @@
 # llama.cpp is linked statically with its Metal backend (the shaders are embedded), so the
 # bundle needs no dynamic libraries. The bundle is signed ad hoc unless CODESIGN_IDENTITY names a
 # signing identity; an ad-hoc signed app downloaded from the internet is blocked by Gatekeeper
-# until it is notarized or its quarantine attribute is removed.
+# until it is notarized or its quarantine attribute is removed. With an identity, the bundle is
+# signed with the hardened runtime and a secure timestamp, as notarization requires.
 #
 # Environment:
 #   MACOSX_DEPLOYMENT_TARGET  oldest macOS to run on (default 13.3, as llama.cpp's Apple builds)
@@ -100,7 +101,7 @@ cat > "$app/Contents/Info.plist" <<EOF
     <key>CFBundleShortVersionString</key>
     <string>$crate</string>
     <key>CFBundleVersion</key>
-    <string>$version</string>
+    <string>$crate</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
@@ -116,9 +117,17 @@ cat > "$app/Contents/Info.plist" <<EOF
 EOF
 plutil -lint "$app/Contents/Info.plist"
 
-# Nested code first, then the bundle.
-codesign --force --timestamp=none --sign "$identity" "$app/Contents/MacOS/plamo-translate-host"
-codesign --force --timestamp=none --sign "$identity" "$app"
+# Nested code first, then the bundle. Notarization, which takes a Developer ID, also needs the
+# hardened runtime and a secure timestamp.
+if [ "$identity" = - ]; then
+    sign_options="--timestamp=none"
+else
+    sign_options="--options runtime --timestamp"
+fi
+# shellcheck disable=SC2086 # sign_options holds separate arguments.
+codesign --force $sign_options --sign "$identity" "$app/Contents/MacOS/plamo-translate-host"
+# shellcheck disable=SC2086
+codesign --force $sign_options --sign "$identity" "$app"
 codesign --verify --strict --verbose=2 "$app"
 
 cp README.md README.ja.md LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt "$dist/"
