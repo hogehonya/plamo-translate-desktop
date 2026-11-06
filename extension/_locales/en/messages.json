@@ -396,5 +396,105 @@
   },
   "pageStoppedForOther": {
     "message": "Stopped: another page is being translated"
+  },
+  "engine": {
+    "message": "Engine"
+  },
+  "engineAuto": {
+    "message": "Automatic (the app when connected)"
+  },
+  "engineApp": {
+    "message": "PLaMo Translate Desktop"
+  },
+  "engineBrowser": {
+    "message": "In the browser"
+  },
+  "settingsHintBrowser": {
+    "message": "In the browser, translation runs on this computer with WebAssembly or WebGPU, without the app. Models up to 2B fit; the larger ones need the app."
+  },
+  "modelAuto": {
+    "message": "Automatic ($WHAT$)",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
+  },
+  "notDownloaded": {
+    "message": "not downloaded"
+  },
+  "download": {
+    "message": "Download"
+  },
+  "downloading": {
+    "message": "Downloading… $PERCENT$%",
+    "placeholders": {
+      "percent": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteModel": {
+    "message": "Delete"
+  },
+  "downloadFailed": {
+    "message": "The download failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "licenseNotice": {
+    "message": "The models are under the PLaMo Community License: personal and non-commercial use is free, and commercial use needs registration. Downloading one means accepting the license."
+  },
+  "licenseRead": {
+    "message": "Read the license"
+  },
+  "licenseUrl": {
+    "message": "https://plamo.preferredai.jp/info/plamo-community-license-en",
+    "description": "The license in the display language."
+  },
+  "licenseAccept": {
+    "message": "Accept and download"
+  },
+  "deviceAutoMeasured": {
+    "message": "Automatic (measured on first use)"
+  },
+  "statusMeasuring": {
+    "message": "Measuring the CPU and the GPU (first use only)…"
+  },
+  "statusInBrowser": {
+    "message": "In the browser · $WHAT$",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusNoModelBrowser": {
+    "message": "No model downloaded yet: download one under Settings"
+  },
+  "errorNoModelBrowser": {
+    "message": "No model is downloaded in the browser yet. Download one under Settings."
+  },
+  "noticeEngineStopped": {
+    "message": "The in-browser engine stopped: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "releaseTitleBrowser": {
+    "message": "Free the model's memory, including GPU memory. The next translation loads it again."
+  },
+  "deleteConfirm": {
+    "message": "Delete $WHAT$ from the browser? Using it again means downloading it again.",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
   }
 }

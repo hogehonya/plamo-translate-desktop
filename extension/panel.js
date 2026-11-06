@@ -1,5 +1,6 @@
 // Side panel: translates text through the background (background.js), which holds the
-// connection to the desktop app's browser host, and shows the translation as it streams in.
+// connection to the engine (the desktop app's browser host, or the in-browser engine), and shows
+// the translation as it streams in.
 // It also starts page translation (page.js) and holds the extension's settings.
 // Texts come from i18n.js (`t`), in the display language chosen here or the browser's.
 
@@ -13,14 +14,24 @@ const TARGETS = [
 ];
 const STYLES = ["", "polite", "plain"];
 const PAGE_MODES = ["replace", "below"];
+const ENGINES = ["auto", "app", "browser"];
 
 const $ = (id) => document.getElementById(id);
 const langName = (code) => t(`lang_${code.replaceAll("-", "_").replace("(easy)", "_easy")}`);
 
 let port = null;
-// The model and device chosen here ("" follows the app); the background sends them whenever
-// it starts the host.
-let choices = { model: "", device: "" };
+/** The engine in use, from its status and options: `app` or `browser`. */
+let engine = "app";
+// The model and device chosen here for each engine, by storage key ("" is the default: the
+// app's choice, or the first model downloaded); the background sends them whenever it starts
+// the engine.
+const choices = { choices: { model: "", device: "" }, browserChoices: { model: "", device: "" } };
+const choiceKey = () => (engine === "browser" ? "browserChoices" : "choices");
+/** The in-browser engine's downloads, by model: its latest `download` message. */
+const downloads = {};
+let licenseAccepted = false;
+/** The model to download once the license is accepted. */
+let pendingDownload = null;
 /** The translation shown: true while waiting for the background to accept it, then its id. */
 let currentId = null;
 let outputNode = document.createTextNode("");
@@ -42,8 +53,13 @@ $("target").addEventListener("change", () => {
 $("style").addEventListener("change", () => chrome.storage.local.set({ style: $("style").value }));
 $("pageMode").addEventListener("change", () => chrome.storage.local.set({ pageMode: $("pageMode").value }));
 $("uiLanguage").addEventListener("change", () => chrome.storage.local.set({ uiLanguage: $("uiLanguage").value }));
+$("engine").addEventListener("change", () => {
+  shownOptions = null;
+  send({ type: "set_engine", engine: $("engine").value });
+});
 // Applied here as in panels of other windows (and in the background, for its menus).
 chrome.storage.local.onChanged.addListener(async (changes) => {
+  if (changes.engine) $("engine").value = changes.engine.newValue ?? "auto";
   if (!changes.uiLanguage) return;
   const uiLanguage = await loadUiLanguage();
   applyLanguage();
@@ -52,11 +68,24 @@ chrome.storage.local.onChanged.addListener(async (changes) => {
 
 for (const id of ["model", "device"]) {
   $(id).addEventListener("change", () => {
-    choices[id] = $(id).value;
-    chrome.storage.local.set({ choices });
-    send({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+    const key = choiceKey();
+    choices[key][id] = $(id).value;
+    chrome.storage.local.set({ [key]: choices[key] });
+    send({ type: "configure", model: choices[key].model || undefined, device: choices[key].device || undefined });
   });
 }
+
+$("licenseLink").addEventListener("click", (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: t("licenseUrl") });
+});
+$("licenseAccept").addEventListener("click", () => {
+  licenseAccepted = true;
+  chrome.storage.local.set({ licenseAccepted });
+  if (pendingDownload) send({ type: "download", model: pendingDownload });
+  pendingDownload = null;
+  renderBrowserModels();
+});
 
 function updateStyleVisibility() {
   // Style applies to Japanese only; "auto" may translate into Japanese.
@@ -76,6 +105,7 @@ function applyLanguage() {
   fill($("target"), TARGETS, langName);
   fill($("style"), STYLES, (style) => t(`style_${style || "default"}`));
   fill($("pageMode"), PAGE_MODES, (mode) => t(`pageMode_${mode}`));
+  fill($("engine"), ENGINES, (name) => t(`engine${name[0].toUpperCase()}${name.slice(1)}`));
   const browser = UI_LANGUAGES[chrome.i18n.getMessage("locale")] ?? "";
   fill($("uiLanguage"), ["auto", ...Object.keys(UI_LANGUAGES)], (lang) =>
     lang === "auto" ? t("uiLanguageAuto", browser) : UI_LANGUAGES[lang],
@@ -89,6 +119,7 @@ function applyLanguage() {
     $("device").value = device;
   }
   if (shownStatus) renderStatus(shownStatus);
+  renderEngineTexts();
   setTranslating(currentId !== null);
   $("progress").textContent = progress();
   if (notice) renderNotice();
@@ -134,15 +165,17 @@ $("copy").addEventListener("click", async () => {
 // is first contacted.
 const ready = Promise.all([
   loadUiLanguage(),
-  chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", choices }),
+  chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", engine: "auto", licenseAccepted: false, ...choices }),
 ]).then(([uiLanguage, saved]) => {
   applyLanguage();
   $("uiLanguage").value = uiLanguage;
   $("target").value = saved.target;
   $("style").value = saved.style;
   $("pageMode").value = saved.pageMode;
+  $("engine").value = saved.engine;
   updateStyleVisibility();
-  choices = { ...choices, ...saved.choices };
+  for (const key of Object.keys(choices)) Object.assign(choices[key], saved[key]);
+  licenseAccepted = saved.licenseAccepted;
 });
 
 // Text selected in a page arrives through session storage (see background.js).
@@ -192,11 +225,21 @@ function onMessage(message) {
     case "status":
       renderStatus(message);
       if (message.state === "disconnected" && message.message) {
-        showNotice(() => (setupNeeded(message.message) ? t("noticeSetup") : t("noticeDisconnected", message.message)));
+        showNotice(() =>
+          message.engine === "browser"
+            ? t("noticeEngineStopped", message.message)
+            : setupNeeded(message.message)
+              ? t("noticeSetup")
+              : t("noticeDisconnected", message.message),
+        );
       }
       return;
     case "options":
       renderOptions(message);
+      return;
+    case "download":
+      downloads[message.model] = message;
+      renderBrowserModels();
       return;
     case "accepted":
       if (currentId === true) currentId = message.id;
@@ -248,7 +291,7 @@ function finish() {
 function errorText(message) {
   switch (message.code) {
     case "no_model":
-      return t("errorNoModel");
+      return engine === "browser" ? t("errorNoModelBrowser") : t("errorNoModel");
     case "model_missing":
       return t("errorModelMissing");
     case "disconnected":
@@ -290,9 +333,17 @@ function setupNeeded(error) {
 
 // ---- Rendering ----
 
+const gb = (bytes) => `${(bytes / 1e9).toFixed(2)} GB`;
+
 function renderOptions(options) {
   shownOptions = options;
-  const gb = (bytes) => `${(bytes / 1e9).toFixed(2)} GB`;
+  engine = options.engine ?? "app";
+  renderEngineTexts();
+  if (engine === "browser") {
+    renderBrowserOptions(options);
+    return;
+  }
+  $("browserModels").hidden = true;
   const model = $("model");
   model.replaceChildren(new Option(t("followApp", options.app_model ?? t("none")), ""));
   for (const m of options.models) model.add(new Option(`${m.label} (${gb(m.bytes)})`, m.id));
@@ -309,9 +360,80 @@ function renderOptions(options) {
   device.value = options.device ?? "";
 }
 
+/** The in-browser engine's models and devices: those that fit, downloaded or not. */
+function renderBrowserOptions(options) {
+  const downloaded = options.models.filter((m) => m.downloaded);
+  const model = $("model");
+  model.replaceChildren(new Option(t("modelAuto", downloaded[0]?.label ?? t("none")), ""));
+  for (const m of options.models) {
+    model.add(new Option(`${m.label} (${gb(m.bytes)})${m.downloaded ? "" : ` — ${t("notDownloaded")}`}`, m.id));
+  }
+  model.value = options.model ?? "";
+  const device = $("device");
+  device.replaceChildren(new Option(t("deviceAutoMeasured"), ""));
+  for (const d of options.devices) device.add(new Option(`${d.name.toUpperCase()} — ${d.description}`, d.name));
+  device.value = options.device && options.device !== "auto" ? options.device : "";
+  renderBrowserModels();
+}
+
+/** The in-browser engine's models with their downloads, and the license before the first one. */
+function renderBrowserModels() {
+  const models = engine === "browser" ? (shownOptions?.models ?? []) : [];
+  $("browserModels").hidden = models.length === 0;
+  $("modelRows").replaceChildren(
+    ...models.map((m) => {
+      const row = document.createElement("div");
+      row.className = "model-row";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = `${m.label} (${gb(m.bytes)})`;
+      const state = document.createElement("span");
+      state.className = "state";
+      const button = document.createElement("button");
+      button.className = "small";
+      const download = downloads[m.id];
+      if (download?.state === "running" || m.downloading) {
+        state.textContent = t("downloading", String(Math.floor((100 * (download?.received ?? 0)) / m.bytes)));
+        button.hidden = true;
+      } else if (m.downloaded) {
+        button.textContent = t("deleteModel");
+        button.onclick = () => {
+          if (confirm(t("deleteConfirm", m.label))) send({ type: "delete", model: m.id });
+        };
+      } else {
+        if (download?.state === "error") {
+          state.textContent = t("downloadFailed", download.message ?? "");
+          state.classList.add("error");
+        }
+        button.textContent = t("download");
+        button.onclick = () => {
+          if (licenseAccepted) {
+            send({ type: "download", model: m.id });
+          } else {
+            pendingDownload = m.id;
+            renderBrowserModels();
+          }
+        };
+      }
+      row.append(name, state, button);
+      return row;
+    }),
+  );
+  $("license").hidden = !pendingDownload;
+}
+
+/** Texts that depend on the engine in use. */
+function renderEngineTexts() {
+  $("settingsHint").textContent = t(engine === "browser" ? "settingsHintBrowser" : "settingsHint");
+  $("release").title = t(engine === "browser" ? "releaseTitleBrowser" : "releaseTitle");
+  $("licenseLink").href = t("licenseUrl");
+}
+
 function renderStatus(status) {
   shownStatus = status;
-  const model = [status.model, status.device].filter(Boolean).join(" · ");
+  if (status.engine) engine = status.engine;
+  let model = [status.model, status.device].filter(Boolean).join(" · ");
+  if (engine === "browser" && model) model = t("statusInBrowser", model);
   $("release").disabled = status.state === "released" || status.state === "disconnected";
   switch (status.state) {
     case "ready":
@@ -321,8 +443,11 @@ function renderStatus(status) {
     case "starting":
       setStatus(t("statusLoading", model));
       break;
+    case "measuring":
+      setStatus(t("statusMeasuring"));
+      break;
     case "no_model":
-      setStatus(t("statusNoModel"), true);
+      setStatus(t(engine === "browser" ? "statusNoModelBrowser" : "statusNoModel"), true);
       break;
     case "released":
       setStatus(status.reason === "idle" ? t("statusReleasedIdle") : t("statusReleased"), false, t("statusReleasedDetail"));

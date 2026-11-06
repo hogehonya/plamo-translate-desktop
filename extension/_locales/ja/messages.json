@@ -396,5 +396,105 @@
   },
   "pageStoppedForOther": {
     "message": "別のページの翻訳を始めたため中止しました"
+  },
+  "engine": {
+    "message": "エンジン"
+  },
+  "engineAuto": {
+    "message": "自動（連携していればアプリ）"
+  },
+  "engineApp": {
+    "message": "PLaMo Translate Desktop"
+  },
+  "engineBrowser": {
+    "message": "ブラウザ内"
+  },
+  "settingsHintBrowser": {
+    "message": "ブラウザ内では、アプリなしで、このコンピュータ上で WebAssembly か WebGPU を使って翻訳します。使えるのは 2B までのモデルで、それより大きいモデルにはアプリが必要です。"
+  },
+  "modelAuto": {
+    "message": "自動（$WHAT$）",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
+  },
+  "notDownloaded": {
+    "message": "未ダウンロード"
+  },
+  "download": {
+    "message": "ダウンロード"
+  },
+  "downloading": {
+    "message": "ダウンロード中… $PERCENT$%",
+    "placeholders": {
+      "percent": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteModel": {
+    "message": "削除"
+  },
+  "downloadFailed": {
+    "message": "ダウンロードに失敗しました: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "licenseNotice": {
+    "message": "モデルは PLaMo Community License で提供されています。個人・非商用の利用は無料で、商用利用には登録が必要です。ダウンロードすると、このライセンスに同意したことになります。"
+  },
+  "licenseRead": {
+    "message": "ライセンスを読む"
+  },
+  "licenseUrl": {
+    "message": "https://plamo.preferredai.jp/info/plamo-community-license-ja",
+    "description": "The license in the display language."
+  },
+  "licenseAccept": {
+    "message": "同意してダウンロード"
+  },
+  "deviceAutoMeasured": {
+    "message": "自動（初回に測って選ぶ）"
+  },
+  "statusMeasuring": {
+    "message": "CPU と GPU の速さを測っています（初回のみ）…"
+  },
+  "statusInBrowser": {
+    "message": "ブラウザ内 · $WHAT$",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusNoModelBrowser": {
+    "message": "モデルがまだありません。設定からダウンロードしてください"
+  },
+  "errorNoModelBrowser": {
+    "message": "ブラウザ内のモデルがまだありません。設定からダウンロードしてください。"
+  },
+  "noticeEngineStopped": {
+    "message": "ブラウザ内のエンジンが止まりました: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "releaseTitleBrowser": {
+    "message": "モデルが使っているメモリ（GPU メモリを含む）を解放します。次に翻訳するときに読み込み直します。"
+  },
+  "deleteConfirm": {
+    "message": "$WHAT$ をブラウザから削除しますか？ もう一度使うには、ダウンロードし直すことになります。",
+    "placeholders": {
+      "what": {
+        "content": "$1"
+      }
+    }
   }
 }

@@ -326,6 +326,14 @@ function onPanelMessage(port, message) {
     case "delete":
       if (host?.kind === "browser") sendHost(message);
       break;
+    case "set_engine":
+      // Saved, then the current engine is released and the new one asked for its options.
+      chrome.storage.local.set({ engine: message.engine }).then(() => {
+        appAvailable = undefined;
+        release("engine");
+        sendHost({ type: "options" });
+      });
+      break;
     case "release":
       release("requested");
       break;
@@ -428,11 +436,6 @@ chrome.runtime.onConnect.addListener((port) => {
 // The display language, read again when the panel changes it.
 let languageReady = loadUiLanguage();
 chrome.storage.local.onChanged.addListener((changes) => {
-  // Another engine: the next request connects to it.
-  if (changes.engine) {
-    appAvailable = undefined;
-    release("engine");
-  }
   if (!changes.uiLanguage) return;
   languageReady = loadUiLanguage().then(() => {
     for (const { id, message } of MENUS) chrome.contextMenus.update(id, { title: t(message) }).catch(() => {});
