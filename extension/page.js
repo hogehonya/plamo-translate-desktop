@@ -51,11 +51,15 @@
   /** Stopped by the user, with paragraphs left that Resume would translate. */
   let stopped = false;
   /**
-   * Runs found but not sent yet: hidden ones (collapsed sections, menus, text for screen
-   * readers), and with the panel's setting those far from the view. They are sent when they
-   * show or come near (see `recheck`).
+   * Runs found but not sent yet, by their first node: hidden ones (collapsed sections, menus),
+   * and with the panel's setting those far from the view. They are sent when they show or come
+   * near (see `recheck`). A run found again (content added to it) replaces the one kept.
    */
-  let deferred = [];
+  let deferred = new Map();
+  /** `segments` messages sent: an `idle` from before the last one does not concern it. */
+  let sends = 0;
+  /** Added content waits this long for more before it is collected. */
+  let mutationTimer = null;
   /** The panel's setting: only the runs near the view are translated, the rest when scrolled to. */
   let nearbyOnly = false;
   let recheckTimer = null;
@@ -235,8 +239,9 @@
           break;
         }
         case "idle":
-          // After a stop or a failure, the box keeps saying so.
-          if (stopped) break;
+          // After a stop or a failure, the box keeps saying so; and paragraphs sent meanwhile
+          // are still to come.
+          if (stopped || message.received < sends) break;
           pending.clear();
           setWorking([]);
           render();
@@ -253,13 +258,22 @@
           stopLocally();
           render(message.reason === "panel" ? t("pageStopped") : t("pageStoppedForOther"));
           break;
-        case "error":
+        case "error": {
+          // Released on request (not after a while without use): the page stops watching for
+          // more, which would load the model again.
+          if (message.code === "released" && message.reason !== "idle") {
+            const had = pending.size > 0;
+            stopLocally();
+            if (had) render(t("pageStopped"));
+            break;
+          }
           // Sent to every page when the connection ends; nothing to say if this one was done.
           if (!pending.size) break;
           // Resume sends the rest again.
           stopLocally();
           render(message.code === "released" ? t("pageStopped") : t("pageError", message.message || message.code));
           break;
+        }
       }
     });
     port.onDisconnect.addListener(() => {
@@ -272,9 +286,13 @@
   }
 
   function send(runs, start = false) {
-    runs = runs.filter((run) => !run.some((node) => handled.has(node)));
+    // Once each, also when a run is in the list twice.
+    runs = runs.filter((run) => {
+      if (run.some((node) => handled.has(node))) return false;
+      for (const node of run) handled.add(node);
+      return true;
+    });
     if (!runs.length) return;
-    for (const run of runs) for (const node of run) handled.add(node);
     if (!port) connect();
     // Visible paragraphs first, then the rest in reading order.
     const height = window.innerHeight;
@@ -292,6 +310,7 @@
         return { sid, text: html };
       });
     total += items.length;
+    sends++;
     port.postMessage({ type: "segments", items, target, style, start });
     render();
   }
@@ -355,56 +374,68 @@
   /** Forgets the paragraphs waiting, which Resume can send again. */
   function stopLocally() {
     for (const item of pending.values()) for (const node of item.run) handled.delete(node);
-    stopped = pending.size > 0 || deferred.length > 0;
+    stopped = pending.size > 0;
     pending.clear();
-    deferred = [];
+    deferred.clear();
     setWorking([]);
     observer?.disconnect();
     observer = null;
+    clearTimeout(mutationTimer);
     clearInterval(recheckTimer);
     recheckTimer = null;
   }
 
   // ---- What is sent: shown, and with the setting near the view ----
 
+  const SHOWN = { checkOpacity: true, checkVisibilityCSS: true };
+
+  /** Whether `node` is not hidden by its styles (display, visibility, opacity). */
+  function styledVisible(node) {
+    let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    // An element with `display: contents` has no box, which checkVisibility takes for hidden;
+    // its parent's box holds its content.
+    while (el && el !== document.body && getComputedStyle(el).display === "contents") el = el.parentElement;
+    return el?.checkVisibility ? el.checkVisibility(SHOWN) : true;
+  }
+
   /**
-   * Whether the run shows on the page: its nodes not hidden by their styles (display,
-   * visibility, opacity), and not shrunk to nothing (text for screen readers only).
+   * Whether the run is wanted now: it shows (not hidden by its styles, and taking some space),
+   * and with the setting it is within a screen of the view.
    */
-  function shown(run) {
-    const options = { checkOpacity: true, checkVisibilityCSS: true };
-    const styled = run.some((node) => {
-      const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-      return el?.checkVisibility ? el.checkVisibility(options) : true;
-    });
-    if (!styled) return false;
+  function wanted(run) {
+    if (!run.some(styledVisible)) return false;
     const rect = runRect(run);
-    return !!rect && rect.width > 2 && rect.height > 2;
-  }
-
-  /** Whether the run is within a screen's height of the view. */
-  function near(run) {
-    const rect = runRect(run);
+    if (!rect || rect.width <= 2 || rect.height <= 2) return false;
     const height = window.innerHeight;
-    return !!rect && rect.bottom > -height && rect.top < 2 * height;
+    return !nearbyOnly || (rect.bottom > -height && rect.top < 2 * height);
   }
-
-  const wanted = (run) => shown(run) && (!nearbyOnly || near(run));
 
   /** Sends the runs wanted now, keeping the others for later. */
   function offer(runs, start = false) {
     const now = [];
-    for (const run of runs) (wanted(run) ? now : deferred).push(run);
+    for (const run of runs) {
+      if (wanted(run)) {
+        deferred.delete(run[0]);
+        now.push(run);
+      } else {
+        deferred.set(run[0], run);
+      }
+    }
     send(now, start);
   }
 
-  /** Sends the deferred runs that show or came near since. */
+  /** Sends the deferred runs that show or came near since (not while the tab is in the background). */
   function recheck() {
-    if (!deferred.length || !observer) return;
-    deferred = deferred.filter((run) => run[0].isConnected && !run.some((node) => handled.has(node)));
-    const now = deferred.filter(wanted);
-    if (!now.length) return;
-    deferred = deferred.filter((run) => !now.includes(run));
+    if (!deferred.size || !observer || document.hidden) return;
+    const now = [];
+    for (const [first, run] of deferred) {
+      if (!first.isConnected || run.some((node) => handled.has(node))) {
+        deferred.delete(first);
+      } else if (wanted(run)) {
+        deferred.delete(first);
+        now.push(run);
+      }
+    }
     send(now);
   }
 
@@ -463,8 +494,12 @@
     }
     // Positions relative to the layer, wherever the page's styles put its origin.
     const origin = marks.host.getBoundingClientRect();
+    const { innerWidth: width, innerHeight: height } = window;
     for (const sid of working) {
-      const rect = pending.has(sid) ? runRect(pending.get(sid).run) : null;
+      let rect = pending.has(sid) ? runRect(pending.get(sid).run) : null;
+      // Only near the view: a frame far off (in a wide table scrolled sideways, say) would make
+      // the page larger.
+      if (rect && (rect.bottom < -height || rect.top > 2 * height || rect.right < -width || rect.left > 2 * width)) rect = null;
       let frame = marks.frames.get(sid);
       if (!rect) {
         frame?.remove();
@@ -528,7 +563,7 @@
   // came near are sent.
   let scrollTimer = null;
   function onScroll() {
-    if (!pending.size && !deferred.length) return;
+    if (!pending.size && !deferred.size) return;
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(() => {
       recheck();
@@ -553,7 +588,8 @@
     }
     applied.length = 0;
     handled = new WeakSet();
-    deferred = [];
+    deferred.clear();
+    stopped = false;
     total = done = 0;
     render(t("pageRestored"));
   }
@@ -581,14 +617,14 @@
       target = kana > sample.length * 0.05 ? "en" : "ja";
     }
     if (target !== "ja") style = "";
-    deferred = [];
+    deferred.clear();
     offer(collect(document.body), true);
     // Also when nothing new was sent (the page is translated already), so that the box shows
     // again, even if it was closed: the request was not ignored.
-    render(total || deferred.length ? undefined : t("pageNothing"));
+    render(total || deferred.size ? undefined : t("pageNothing"));
     // Paragraphs added later (infinite scrolling, expanding sections).
     observer?.disconnect();
-    let timer = null;
+    clearTimeout(mutationTimer);
     const added = new Set();
     observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
@@ -598,13 +634,15 @@
           }
         }
       }
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const roots = [...added].filter((n) => n.isConnected);
+      clearTimeout(mutationTimer);
+      mutationTimer = setTimeout(() => {
+        // Stopped (or undone) meanwhile.
+        if (!observer) return;
+        // What an inline node was added to is collected again; nested roots once, by the outer.
+        const roots = [...new Set([...added].filter((n) => n.isConnected).map((n) => (inline(n) ? (n.parentElement ?? n) : n)))];
         added.clear();
-        // Overlapping roots find a run twice; send() drops those already sent.
-        const runs = roots.flatMap((root) => (inline(root) ? collect(root.parentElement ?? root) : collect(root)));
-        offer(runs.filter((run) => !deferred.some((d) => d[0] === run[0])));
+        const outer = roots.filter((root) => !roots.some((other) => other !== root && other.contains(root)));
+        offer(outer.flatMap((root) => collect(root)));
       }, 500);
     });
     observer.observe(document.body, { childList: true, subtree: true });

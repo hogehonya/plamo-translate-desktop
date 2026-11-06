@@ -543,7 +543,7 @@ or, from v0.4.0, on its own with an in-browser engine (see "In-browser engine" b
   - The translation is parsed inertly (`DOMParser`) and rebuilt from text nodes and clones of the run's own elements, looked up by index,
     so links keep their targets and nothing the model writes can add attributes, elements, or scripts. Unknown or repeated indices keep only their text.
   - The runs in view go first; when scrolling stops, the pending runs in view move to the front of the queue (`prioritize`).
-  - Runs that do not show (hidden by `display`, `visibility` or `opacity`, as `checkVisibility` tells, or shrunk to a pixel) are
+  - Runs that do not show (hidden by `display`, `visibility` or `opacity`, as `checkVisibility` tells, or taking no space) are
     kept back, and with the panel's `pageNearby` setting those more than a screen from the view too; they are sent when they show
     or come near, checked when scrolling stops and every two seconds (sections that open add no nodes).
   - The background tells the page which runs the host is on (`working`: the first not done of each batch running, since a batch

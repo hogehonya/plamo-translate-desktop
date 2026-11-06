@@ -223,7 +223,8 @@ function release(reason) {
     page.pending = [];
     page.busySince = null;
     page.busyTokens = 0;
-    post(page.port, { type: "error", code: "released" });
+    // Released on request, pages stop watching for more (which would start the engine again).
+    post(page.port, { type: "error", code: "released", reason });
   }
   status = { type: "status", state: "released", reason };
   broadcast(status);
@@ -315,8 +316,13 @@ function onBatchMessage(job, message) {
     return;
   }
   // Paragraphs not translated because the batch was cancelled (a panel translation
-  // interrupted it, or the model changed) go back to the front of the queue.
+  // interrupted it, or the model changed) go back to the front of the queue. Batches
+  // interrupted together come back one by one: their paragraphs go back in the page's order.
+  for (const item of undone) item.requeued = true;
   page.pending.unshift(...undone);
+  let front = 0;
+  while (front < page.pending.length && page.pending[front].requeued) front++;
+  page.pending.splice(0, front, ...page.pending.slice(0, front).sort((a, b) => a.sid - b.sid));
   reportPage(page);
 }
 
@@ -409,14 +415,16 @@ function schedule() {
   }
   const slots = batchSlots();
   while (active.size < slots) {
-    const entry = [...pages].find(([, page]) => page.pending.length);
+    // The page whose translation started last first (another can have found more to translate).
+    const entry = [...pages].filter(([, page]) => page.pending.length).sort((a, b) => (b[1].startedAt ?? 0) - (a[1].startedAt ?? 0))[0];
     if (!entry) return;
     const [tabId, page] = entry;
     if (slots === 1) {
       startBatch(tabId, page, take(page, BATCH_SEGMENTS, BATCH_CHARS));
       continue;
     }
-    if ([...active].some((job) => job.kind === "page" && job.tabId === tabId)) return;
+    // A round takes all the slots: after the last batch running, of any page.
+    if (active.size) return;
     const round = take(page, slots * BATCH_SEGMENTS, slots * BATCH_CHARS);
     const batches = Array.from({ length: Math.min(slots, round.length) }, () => []);
     round.forEach((item, i) => batches[i % batches.length].push(item));
@@ -428,7 +436,8 @@ function schedule() {
 /** Tells a page when all its paragraphs are translated. */
 function reportPage(page) {
   const busy = [...jobs.values()].some((job) => job.kind === "page" && pages.get(job.tabId) === page);
-  if (!busy && !page.pending.length) post(page.port, { type: "idle" });
+  // With the number of segments messages taken, so that one sent meanwhile is not taken as done.
+  if (!busy && !page.pending.length) post(page.port, { type: "idle", received: page.received });
 }
 
 function broadcast(message) {
@@ -573,7 +582,9 @@ function onPageMessage(port, message) {
           post(page.port, { type: "stopped" });
         }
       }
-      const page = pages.get(tabId) ?? { port, pending: [], busySince: null, busyTokens: 0 };
+      const page = pages.get(tabId) ?? { port, pending: [], busySince: null, busyTokens: 0, received: 0 };
+      page.received = page.port === port ? page.received + 1 : 1;
+      if (message.start) page.startedAt = performance.now();
       page.port = port;
       page.target = message.target;
       page.style = message.style;
