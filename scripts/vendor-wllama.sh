@@ -22,7 +22,6 @@ cp "$src/llama.cpp/LICENSE" "$out/LICENSE-llama.cpp.txt"
 wllama_commit=$(git -C "$src" rev-parse HEAD)
 llama_commit=$(git -C "$src/llama.cpp" rev-parse HEAD)
 version=$(node -p "require('./$src/package.json').version")
-llama_build=$(sed -n "s/^export const LIBLLAMA_VERSION = '\(.*\)';/\1/p" "$src/src/workers-code/generated.ts")
 
 cat > "$out/README.md" <<EOF
 # wllama
@@ -34,7 +33,7 @@ Built from source by \`.github/workflows/wllama.yml\`, because the npm releases 
 bundle a llama.cpp that predates the PLaMo 3 tokenizer:
 
 - wllama $version, commit $wllama_commit
-- llama.cpp $llama_build, commit $llama_commit
+- llama.cpp commit $llama_commit
 
 \`wllama.js\` is wllama's \`esm/index.js\` and \`wllama.wasm\` its \`esm/wasm/wllama.wasm\`, unmodified.
 To update, run the workflow and replace this folder with its artifact.

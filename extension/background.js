@@ -1,13 +1,16 @@
-// Holds the one connection to the desktop app's browser host (native messaging) and shares it
-// between the side panels and page translation. The host protocol is described in
+// Holds the one connection to a translation engine and shares it between the side panels and
+// page translation. The engine is the desktop app's browser host (native messaging), or the
+// in-browser engine (engine.js in an offscreen document, with wllama) when the app is not
+// connected or the panel's settings ask for it. Both speak the host's protocol, described in
 // crates/host/src/protocol.rs.
 //
 // - Panels connect here (port "panel"). Their translations start at once; a page translation
 //   in progress is interrupted and its unfinished paragraphs are sent again afterwards.
 // - Page translation runs in page.js (port "page"), which sends paragraphs; they go to the
 //   host in small batches while nothing else is running.
-// - The connection closes after IDLE_MS without work, which ends the host and frees the
-//   model's memory. Chrome keeps this service worker alive while the connection is open.
+// - The connection closes after IDLE_MS without work, which ends the host (or closes the
+//   offscreen document) and frees the model's memory. Chrome keeps this service worker alive
+//   while the host's connection is open; the in-browser engine sends `keepalive` messages.
 // - The context menus and page.js show texts in the display language chosen in the panel.
 
 importScripts("i18n.js");
@@ -23,9 +26,19 @@ const MENUS = [
   { id: MENU_PAGE, message: "menuTranslatePage", contexts: ["page"] },
 ];
 
+/**
+ * The engine connection: { kind: "app" | "browser", port }. Both are null until the engine is
+ * chosen and connected (see `hostReady`).
+ */
 let host = null;
 /** Settles once the new connection's `configure` is sent; messages wait for it. */
 let hostReady = Promise.resolve();
+/** Whether the app's host answered, for automatic engine selection; asked again after it fails. */
+let appAvailable;
+/** Resolves with the in-browser engine's port once its document connects. */
+let engineConnected = null;
+/** Models the in-browser engine is downloading: the connection is busy meanwhile. */
+const downloads = new Set();
 let idleTimer = null;
 let status = { type: "status", state: "released" };
 let options = null;
@@ -44,29 +57,88 @@ let active = null;
 /** Page translations by tab: { port, target, style, pending: [{ sid, text }] }. */
 const pages = new Map();
 
-// ---- Native host ----
+// ---- Engines ----
+
+/** The engine to use: the panel's choice, or on automatic the app if its host answers. */
+async function chooseEngine() {
+  const { engine } = await chrome.storage.local.get({ engine: "auto" }).catch(() => ({ engine: "auto" }));
+  if (engine === "app" || engine === "browser") return engine;
+  appAvailable ??= await probeApp();
+  return appAvailable ? "app" : "browser";
+}
+
+/** Whether the app's host starts and answers: it is registered, and the app is where it was. */
+function probeApp() {
+  return new Promise((resolve) => {
+    const port = chrome.runtime.connectNative(HOST);
+    port.onMessage.addListener(() => {
+      resolve(true);
+      port.disconnect();
+    });
+    port.onDisconnect.addListener(() => resolve(false));
+    port.postMessage({ type: "status" });
+  });
+}
+
+/** Opens the in-browser engine's document and waits for it to connect. */
+async function openEngine() {
+  // Left over from a service worker that stopped: its model belongs to no connection.
+  if ((await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] })).length) {
+    await chrome.offscreen.closeDocument();
+  }
+  const connected = new Promise((resolve) => (engineConnected = resolve));
+  await chrome.offscreen.createDocument({
+    url: "engine.html",
+    reasons: ["WORKERS"],
+    justification: "Runs the translation model with WebAssembly and WebGPU when the desktop app is not connected.",
+  });
+  return connected;
+}
 
 function connectHost() {
-  host = chrome.runtime.connectNative(HOST);
-  host.onMessage.addListener(onHostMessage);
-  host.onDisconnect.addListener(() => {
-    const error = chrome.runtime.lastError?.message ?? "";
-    host = null;
-    clearTimeout(idleTimer);
-    status = { type: "status", state: "disconnected", message: error };
-    broadcast(status);
-    failAll({ code: "disconnected", message: error });
-  });
-  // The host loads a model only after this, so the app's model is not loaded in vain.
-  const connection = host;
-  hostReady = chrome.storage.local
-    .get({ choices: {} })
-    .catch(() => ({ choices: {} }))
-    .then(({ choices }) => {
-      if (host === connection) {
-        host.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
-      }
+  const connection = { kind: null, port: null };
+  host = connection;
+  hostReady = (async () => {
+    const kind = await chooseEngine();
+    const port = kind === "browser" ? await openEngine() : chrome.runtime.connectNative(HOST);
+    connection.kind = kind;
+    connection.port = port;
+    if (host !== connection) {
+      closeConnection(connection);
+      return;
+    }
+    port.onMessage.addListener((message) => onHostMessage(connection, message));
+    port.onDisconnect.addListener(() => {
+      const error = chrome.runtime.lastError?.message ?? "";
+      if (connection.kind === "app") appAvailable = undefined;
+      if (host !== connection) return;
+      host = null;
+      clearTimeout(idleTimer);
+      downloads.clear();
+      status = { type: "status", state: "disconnected", engine: kind, message: error };
+      broadcast(status);
+      failAll({ code: "disconnected", message: error });
     });
+    // The engine loads a model only after this, so the default one is not loaded in vain. Each
+    // engine has its own choices: their models and devices differ.
+    const key = kind === "browser" ? "browserChoices" : "choices";
+    const { [key]: choices } = await chrome.storage.local.get({ [key]: {} }).catch(() => ({ [key]: {} }));
+    if (host === connection) {
+      port.postMessage({ type: "configure", model: choices.model || undefined, device: choices.device || undefined });
+    }
+  })().catch((e) => {
+    if (host !== connection) return;
+    host = null;
+    status = { type: "status", state: "disconnected", engine: connection.kind, message: String(e?.message ?? e) };
+    broadcast(status);
+    failAll({ code: "disconnected", message: status.message });
+  });
+}
+
+/** Ends a connection from this side, which fires no onDisconnect. */
+function closeConnection(connection) {
+  connection.port?.disconnect();
+  if (connection.kind === "browser") chrome.offscreen.closeDocument().catch(() => {});
 }
 
 /** Sends `message` after `configure`, connecting first if needed; messages keep their order. */
@@ -75,8 +147,8 @@ async function sendHost(message) {
   const connection = host;
   await hostReady;
   // Dropped if the connection ended meanwhile.
-  if (host !== connection) return;
-  host.postMessage(message);
+  if (host !== connection || !connection.port) return;
+  connection.port.postMessage(message);
   touch();
 }
 
@@ -86,14 +158,15 @@ function touch() {
 }
 
 function releaseIfIdle() {
-  if (jobs.size || [...pages.values()].some((p) => p.pending.length)) return touch();
+  if (jobs.size || downloads.size || [...pages.values()].some((p) => p.pending.length)) return touch();
   release("idle");
 }
 
 function release(reason) {
   if (!host) return;
-  host.disconnect();
+  closeConnection(host);
   host = null;
+  downloads.clear();
   clearTimeout(idleTimer);
   // Closing our end fires no onDisconnect; end the jobs here.
   for (const job of jobs.values()) {
@@ -111,15 +184,23 @@ function release(reason) {
   broadcast(status);
 }
 
-function onHostMessage(message) {
+function onHostMessage(connection, message) {
+  if (host !== connection) return;
+  // Only keeps this service worker alive: not a use of the model.
+  if (message.type === "keepalive") return;
   touch();
   switch (message.type) {
     case "status":
-      status = message;
-      broadcast(message);
+      status = { ...message, engine: connection.kind };
+      broadcast(status);
       return;
     case "options":
-      options = message;
+      options = { ...message, engine: connection.kind };
+      broadcast(options);
+      return;
+    case "download":
+      if (message.state === "running") downloads.add(message.model);
+      else downloads.delete(message.model);
       broadcast(message);
       return;
   }
@@ -240,6 +321,11 @@ function onPanelMessage(port, message) {
     case "status":
       sendHost(message);
       break;
+    // The in-browser engine's models.
+    case "download":
+    case "delete":
+      if (host?.kind === "browser") sendHost(message);
+      break;
     case "release":
       release("requested");
       break;
@@ -319,6 +405,14 @@ chrome.runtime.onConnect.addListener((port) => {
       panels.delete(port);
       if (active?.kind === "panel" && active.port === port) sendHost({ type: "cancel" });
     });
+  } else if (port.name === "engine") {
+    // The in-browser engine's document, opened by openEngine.
+    if (engineConnected) {
+      engineConnected(port);
+      engineConnected = null;
+    } else {
+      port.disconnect();
+    }
   } else if (port.name === "page") {
     port.onMessage.addListener((message) => onPageMessage(port, message));
     port.onDisconnect.addListener(() => {
@@ -334,6 +428,11 @@ chrome.runtime.onConnect.addListener((port) => {
 // The display language, read again when the panel changes it.
 let languageReady = loadUiLanguage();
 chrome.storage.local.onChanged.addListener((changes) => {
+  // Another engine: the next request connects to it.
+  if (changes.engine) {
+    appAvailable = undefined;
+    release("engine");
+  }
   if (!changes.uiLanguage) return;
   languageReady = loadUiLanguage().then(() => {
     for (const { id, message } of MENUS) chrome.contextMenus.update(id, { title: t(message) }).catch(() => {});
