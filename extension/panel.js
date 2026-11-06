@@ -34,8 +34,12 @@ let licenseAccepted = false;
 let pendingDownload = null;
 /** The translation shown: true while waiting for the background to accept it, then its id. */
 let currentId = null;
-/** When its first text arrived, for the speed shown when it ends. */
+/** When its first text arrived and how many pieces came since (about one token each), for the speed. */
 let firstTextAt = null;
+let streamTokens = 0;
+/** The progress line without the speed, while translating. */
+let progressBase = null;
+let speedShownAt = 0;
 let outputNode = document.createTextNode("");
 // What the status line, the progress line, and the notice show, kept to show it again when the
 // display language changes. Texts are functions giving them in the current language.
@@ -76,6 +80,16 @@ for (const id of ["model", "device"]) {
     send({ type: "configure", model: choices[key].model || undefined, device: choices[key].device || undefined });
   });
 }
+
+$("resetSettings").addEventListener("click", async () => {
+  if (!confirm(t("resetSettingsConfirm"))) return;
+  await chrome.storage.local.clear();
+  // The in-browser engine's device measurement (this extension's localStorage).
+  localStorage.clear();
+  // The background releases the engine and connects to the automatic one.
+  send({ type: "set_engine", engine: "auto" });
+  location.reload();
+});
 
 $("licenseLink").addEventListener("click", (e) => {
   e.preventDefault();
@@ -242,6 +256,7 @@ function translate(text) {
   hideNotice();
   currentId = true;
   firstTextAt = null;
+  streamTokens = 0;
   outputNode.data = "";
   setProgress(() => "");
   $("copy").disabled = true;
@@ -286,15 +301,23 @@ function onMessage(message) {
   if (message.id !== currentId) return;
   switch (message.type) {
     case "started":
-      setProgress(() => t("translatingInto", langName(message.target)));
+      setLiveProgress(() => t("translatingInto", langName(message.target)));
       break;
     case "progress":
-      if (message.count > 1) setProgress(() => `${message.index + 1} / ${message.count}`);
+      if (message.count > 1) setLiveProgress(() => `${message.index + 1} / ${message.count}`);
       break;
-    case "text":
-      firstTextAt ??= performance.now();
+    case "text": {
+      const now = performance.now();
+      firstTextAt ??= now;
+      streamTokens++;
       outputNode.appendData(message.text);
+      // The speed, a few times a second.
+      if (progressBase && now - speedShownAt > 250) {
+        speedShownAt = now;
+        $("progress").textContent = progress();
+      }
       break;
+    }
     case "rewind":
       // Lengths are in UTF-16 code units, like JavaScript strings.
       outputNode.data = outputNode.data.slice(0, message.length);
@@ -508,8 +531,20 @@ function setStatus(text, isError = false, detail = "") {
 
 /** Shows the progress line; `text` gives it in the current language. */
 function setProgress(text) {
+  progressBase = null;
   progress = text;
   $("progress").textContent = text();
+}
+
+/** The progress line while translating: `base`, then the speed so far once tokens arrive. */
+function setLiveProgress(base) {
+  setProgress(() => {
+    const seconds = firstTextAt === null ? 0 : (performance.now() - firstTextAt) / 1000;
+    // The first piece starts the clock.
+    const speed = streamTokens > 2 && seconds > 0.2 ? ((streamTokens - 1) / seconds).toFixed(1) : null;
+    return speed ? `${base()} · ${t("liveSpeed", speed)}` : base();
+  });
+  progressBase = base;
 }
 
 function setTranslating(translating) {

@@ -516,5 +516,19 @@
   },
   "statusGpuUnavailable": {
     "message": "GPU を使えませんでした"
+  },
+  "liveSpeed": {
+    "message": "毎秒 $SPEED$ トークン",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      }
+    }
+  },
+  "resetSettings": {
+    "message": "設定を初期化"
+  },
+  "resetSettingsConfirm": {
+    "message": "拡張機能の設定を初期化しますか？ ライセンスへの同意とデバイスの測定結果も消えます。ダウンロード済みのモデルは残ります。"
   }
 }

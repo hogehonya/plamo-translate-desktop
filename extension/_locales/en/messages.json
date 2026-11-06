@@ -516,5 +516,19 @@
   },
   "statusGpuUnavailable": {
     "message": "the GPU could not be used"
+  },
+  "liveSpeed": {
+    "message": "$SPEED$ tokens/s",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      }
+    }
+  },
+  "resetSettings": {
+    "message": "Reset settings"
+  },
+  "resetSettingsConfirm": {
+    "message": "Reset the extension's settings, including the license acceptance and the measured device? Downloaded models are kept."
   }
 }
