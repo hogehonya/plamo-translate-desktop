@@ -496,5 +496,25 @@
         "content": "$1"
       }
     }
+  },
+  "doneSpeed": {
+    "message": "完了 · $TOKENS$ トークン · 毎秒 $SPEED$ トークン",
+    "placeholders": {
+      "tokens": {
+        "content": "$1"
+      },
+      "speed": {
+        "content": "$2"
+      }
+    }
+  },
+  "stopPage": {
+    "message": "このページの翻訳を中止"
+  },
+  "stopPageTitle": {
+    "message": "今のタブのページの翻訳を中止します。ページ右下の表示から再開できます。"
+  },
+  "statusGpuUnavailable": {
+    "message": "GPU を使えませんでした"
   }
 }

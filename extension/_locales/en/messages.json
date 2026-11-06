@@ -496,5 +496,25 @@
         "content": "$1"
       }
     }
+  },
+  "doneSpeed": {
+    "message": "Done · $TOKENS$ tokens · $SPEED$ tokens/s",
+    "placeholders": {
+      "tokens": {
+        "content": "$1"
+      },
+      "speed": {
+        "content": "$2"
+      }
+    }
+  },
+  "stopPage": {
+    "message": "Stop translating this page"
+  },
+  "stopPageTitle": {
+    "message": "Stop the translation of the page in the current tab; the box on the page can resume it."
+  },
+  "statusGpuUnavailable": {
+    "message": "the GPU could not be used"
   }
 }

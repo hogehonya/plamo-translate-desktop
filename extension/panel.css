@@ -18,6 +18,8 @@
   }
 }
 * { box-sizing: border-box; }
+/* `hidden` wins over the display of classes such as .license. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   padding: 12px;
@@ -74,6 +76,9 @@ button.page-button {
   font-weight: 600;
 }
 button.page-button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* While the active tab translates, the same button stops it. */
+button.page-button.running { border-color: var(--error); color: var(--error); }
+button.page-button.running:hover { background: color-mix(in srgb, var(--error) 12%, transparent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { background: var(--error); border-color: var(--error); color: #fff; }
 textarea { width: 100%; padding: 8px; resize: vertical; max-height: 50vh; }

@@ -227,9 +227,9 @@
           render();
           break;
         case "stopped":
-          // Another page started translating.
+          // From the panel's button, or because another page started translating.
           stopLocally();
-          render(t("pageStoppedForOther"));
+          render(message.reason === "panel" ? t("pageStopped") : t("pageStoppedForOther"));
           break;
         case "error":
           // Sent to every page when the connection ends; nothing to say if this one was done.

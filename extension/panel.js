@@ -34,6 +34,8 @@ let licenseAccepted = false;
 let pendingDownload = null;
 /** The translation shown: true while waiting for the background to accept it, then its id. */
 let currentId = null;
+/** When its first text arrived, for the speed shown when it ends. */
+let firstTextAt = null;
 let outputNode = document.createTextNode("");
 // What the status line, the progress line, and the notice show, kept to show it again when the
 // display language changes. Texts are functions giving them in the current language.
@@ -120,6 +122,7 @@ function applyLanguage() {
   }
   if (shownStatus) renderStatus(shownStatus);
   renderEngineTexts();
+  renderPageButton();
   setTranslating(currentId !== null);
   $("progress").textContent = progress();
   if (notice) renderNotice();
@@ -148,7 +151,32 @@ $("source").addEventListener("keydown", (e) => {
   }
 });
 $("release").addEventListener("click", () => send({ type: "release" }));
-$("translatePage").addEventListener("click", translatePage);
+$("translatePage").addEventListener("click", () => {
+  if (activeTabId !== null && runningPages.has(activeTabId)) {
+    send({ type: "stop_page", tabId: activeTabId });
+  } else {
+    translatePage();
+  }
+});
+
+/** The active tab of this panel's window, and the tabs whose page translation runs. */
+let activeTabId = null;
+let runningPages = new Set();
+async function updateActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  activeTabId = tab?.id ?? null;
+  renderPageButton();
+}
+chrome.tabs.onActivated.addListener(updateActiveTab);
+updateActiveTab();
+
+function renderPageButton() {
+  const running = activeTabId !== null && runningPages.has(activeTabId);
+  const button = $("translatePage");
+  button.textContent = t(running ? "stopPage" : "translatePage");
+  button.title = t(running ? "stopPageTitle" : "translatePageTitle");
+  button.classList.toggle("running", running);
+}
 
 async function translatePage() {
   hideNotice();
@@ -213,6 +241,7 @@ function translate(text) {
   if (!text.trim()) return;
   hideNotice();
   currentId = true;
+  firstTextAt = null;
   outputNode.data = "";
   setProgress(() => "");
   $("copy").disabled = true;
@@ -241,6 +270,10 @@ function onMessage(message) {
       downloads[message.model] = message;
       renderBrowserModels();
       return;
+    case "pages":
+      runningPages = new Set(message.running);
+      renderPageButton();
+      return;
     case "accepted":
       if (currentId === true) currentId = message.id;
       return;
@@ -259,22 +292,29 @@ function onMessage(message) {
       if (message.count > 1) setProgress(() => `${message.index + 1} / ${message.count}`);
       break;
     case "text":
+      firstTextAt ??= performance.now();
       outputNode.appendData(message.text);
       break;
     case "rewind":
       // Lengths are in UTF-16 code units, like JavaScript strings.
       outputNode.data = outputNode.data.slice(0, message.length);
       break;
-    case "done":
+    case "done": {
+      // Generation speed: the tokens over the time since the first one arrived.
+      const seconds = firstTextAt === null ? 0 : (performance.now() - firstTextAt) / 1000;
+      const speed = message.tokens > 1 && seconds > 0 ? (message.tokens / seconds).toFixed(1) : null;
       setProgress(() =>
         message.stopped
           ? t("stopped")
           : message.cut > 0
             ? t("doneCut", String(message.cut))
-            : t("done", String(message.tokens)),
+            : speed
+              ? t("doneSpeed", String(message.tokens), speed)
+              : t("done", String(message.tokens)),
       );
       finish();
       break;
+    }
     case "error":
       showNotice(() => errorText(message));
       finish();
@@ -437,7 +477,7 @@ function renderStatus(status) {
   $("release").disabled = status.state === "released" || status.state === "disconnected";
   switch (status.state) {
     case "ready":
-      setStatus(model);
+      setStatus(status.gpuUnavailable ? `${model} — ${t("statusGpuUnavailable")}` : model, status.gpuUnavailable);
       break;
     case "loading":
     case "starting":

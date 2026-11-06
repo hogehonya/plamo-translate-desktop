@@ -202,17 +202,39 @@ async function measure() {
 async function load(model, device) {
   if (loaded?.model === model && loaded.device === device) return;
   await unload();
-  setStatus({ state: "loading", model: model.label, device: deviceLabel(device) });
+  setStatus({ state: "loading", model: model.label, device: device === "gpu" ? "WebGPU" : "CPU" });
   const file = await (await (await modelsDir()).getFileHandle(fileName(model))).getFile();
-  const wllama = new Wllama({ default: "./vendor/wllama/wllama.wasm" }, { logger: { debug() {}, log() {}, info() {}, warn: console.warn, error: console.error } });
+  // llama.cpp's messages while loading tell which device it really uses.
+  const lines = [];
+  const keep = (...args) => lines.push(args.join(" "));
+  const wllama = new Wllama({ default: "./vendor/wllama/wllama.wasm" }, {
+    // The layers offloaded are logged at the debug level, the adapter at the log level.
+    logger: { debug: keep, log: keep, info: keep, warn: keep, error: (...args) => (keep(...args), console.error(...args)) },
+  });
   try {
     await wllama.loadModel([file], { n_ctx: N_CTX, n_gpu_layers: device === "gpu" ? 999 : 0 });
   } catch (e) {
     await wllama.exit().catch(() => {});
     throw e;
   }
-  loaded = { model, device, wllama };
+  loaded = { model, device, wllama, gpu: device === "gpu" ? usedGpu(lines) : null };
+  if (device === "gpu" && !loaded.gpu) console.warn("WebGPU was not used:", lines.filter((l) => /webgpu|offload/i.test(l)).join("\n"));
 }
+
+/**
+ * The GPU llama.cpp computes on, from its messages while loading (its adapter, and the layers
+ * offloaded), or null: without an adapter in wllama's worker it quietly computes on the CPU.
+ */
+function usedGpu(lines) {
+  const adapter = lines.find((l) => l.includes("ggml_webgpu: adapter_info:"));
+  const offloaded = lines.map((l) => /offloaded (\d+)\/\d+ layers to GPU/.exec(l)).find(Boolean);
+  if (!adapter || !offloaded || offloaded[1] === "0") return null;
+  const field = (name) => new RegExp(`${name}: ([^|]*)`).exec(adapter)?.[1].trim();
+  return [field("vendor"), field("architecture")].filter(Boolean).join(" ") || "WebGPU";
+}
+
+/** The device in use, as the status shows it: `WebGPU (amd rdna-4)`, or `CPU`. */
+const deviceLabel = () => (loaded?.gpu ? `WebGPU (${loaded.gpu})` : "CPU");
 
 async function unload() {
   const current = loaded;
@@ -220,7 +242,6 @@ async function unload() {
   await current?.wllama.exit().catch(() => {});
 }
 
-const deviceLabel = (device) => (device === "gpu" ? "WebGPU" : "CPU");
 
 /**
  * Loads the selected model on the selected device. On `auto` with a GPU, the first load measures
@@ -247,7 +268,8 @@ async function ensureLoaded() {
     setStatus({ state: "measuring", model: model.label });
     const failed = { seconds: Infinity };
     await load(model, "gpu");
-    const gpuSpeed = await measure().catch(() => failed);
+    // Without the GPU in use, this would measure the CPU.
+    const gpuSpeed = loaded.gpu ? await measure().catch(() => failed) : failed;
     await load(model, "cpu");
     const cpuSpeed = await measure().catch(() => failed);
     const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
@@ -256,7 +278,8 @@ async function ensureLoaded() {
   })();
   try {
     await loading;
-    setStatus({ state: "ready", model: model.label, device: deviceLabel(loaded.device) });
+    // `gpuUnavailable`: WebGPU was chosen (or measured) but llama.cpp could not use it.
+    setStatus({ state: "ready", model: model.label, device: deviceLabel(), gpuUnavailable: loaded.device === "gpu" && !loaded.gpu });
   } catch (e) {
     setStatus({ state: "error", model: model.label, message: String(e?.message ?? e) });
     throw Object.assign(new Error(String(e?.message ?? e)), { code: "load_failed" });

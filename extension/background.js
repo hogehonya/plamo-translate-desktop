@@ -182,6 +182,7 @@ function release(reason) {
   }
   status = { type: "status", state: "released", reason };
   broadcast(status);
+  reportPages();
 }
 
 function onHostMessage(connection, message) {
@@ -217,6 +218,7 @@ function onHostMessage(connection, message) {
     onBatchMessage(job, message);
   }
   if (finished) schedule();
+  reportPages();
 }
 
 function onBatchMessage(job, message) {
@@ -259,6 +261,7 @@ function failAll(error) {
     page.pending = [];
     page.port.postMessage({ type: "error", ...error });
   }
+  reportPages();
 }
 
 /** Starts the next page batch when the host is free. */
@@ -296,6 +299,23 @@ function broadcast(message) {
   for (const port of panels) port.postMessage(message);
 }
 
+/** The tabs whose page translation runs: paragraphs waiting, or a batch at the engine. */
+function runningPages() {
+  return [...pages]
+    .filter(([tabId, page]) => page.pending.length || [...jobs.values()].some((j) => j.kind === "page" && j.tabId === tabId && !j.cancelled))
+    .map(([tabId]) => tabId);
+}
+
+let reportedPages = "";
+/** Tells the panels which tabs are translating, when that changes (their page button stops it). */
+function reportPages(port = null) {
+  const running = runningPages();
+  const key = running.join(",");
+  if (port) port.postMessage({ type: "pages", running });
+  else if (key !== reportedPages) broadcast({ type: "pages", running });
+  reportedPages = key;
+}
+
 // ---- Panels ----
 
 function onPanelMessage(port, message) {
@@ -303,6 +323,7 @@ function onPanelMessage(port, message) {
     case "hello":
       port.postMessage(status);
       if (options) port.postMessage(options);
+      reportPages(port);
       if (host) sendHost({ type: "options" });
       break;
     case "translate": {
@@ -321,10 +342,13 @@ function onPanelMessage(port, message) {
     case "status":
       sendHost(message);
       break;
-    // The in-browser engine's models.
+    // The in-browser engine's models, connecting to it if it was released (or not started yet).
     case "download":
     case "delete":
-      if (host?.kind === "browser") sendHost(message);
+      (async () => {
+        const kind = host ? host.kind : await chooseEngine();
+        if (kind === "browser" || kind === null) sendHost(message);
+      })();
       break;
     case "set_engine":
       // Saved, then the current engine is released and the new one asked for its options.
@@ -337,6 +361,12 @@ function onPanelMessage(port, message) {
     case "release":
       release("requested");
       break;
+    case "stop_page": {
+      const page = pages.get(message.tabId);
+      stopPage(message.tabId);
+      page?.port.postMessage({ type: "stopped", reason: "panel" });
+      break;
+    }
     case "translate_page":
       translatePage(message.tabId).then(
         () => port.postMessage({ type: "page_started" }),
@@ -376,6 +406,7 @@ function onPageMessage(port, message) {
       page.pending.push(...message.items);
       pages.set(tabId, page);
       schedule();
+      reportPages();
       break;
     }
     case "cancel":
@@ -401,6 +432,7 @@ function stopPage(tabId) {
     if (job.kind === "page" && job.tabId === tabId) job.cancelled = true;
   }
   if (active?.kind === "page" && active.tabId === tabId) sendHost({ type: "cancel" });
+  reportPages();
 }
 
 // ---- Wiring ----
@@ -429,6 +461,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (page?.port !== port) return;
       stopPage(tabId);
       pages.delete(tabId);
+      reportPages();
     });
   }
 });
