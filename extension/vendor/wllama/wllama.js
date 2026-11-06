@@ -307,6 +307,11 @@ var GLUE_MESSAGE_PROTOTYPES = {
         "isNullable": true
       },
       {
+        "type": "int",
+        "name": "cache_ram_mib",
+        "isNullable": true
+      },
+      {
         "type": "arr_str",
         "name": "lora_paths",
         "isNullable": true
@@ -2902,6 +2907,7 @@ var Wllama = class {
         ctx_shift: params.ctx_shift,
         cache_idle_slots: params.cache_idle_slots,
         n_cache_reuse: params.n_cache_reuse,
+        cache_ram_mib: params.cache_ram_mib,
         lora_paths: (_h = params.lora_adapters) == null ? void 0 : _h.map((a) => a.path),
         lora_scales: (_i = params.lora_adapters) == null ? void 0 : _i.map((a) => {
           var _a2;

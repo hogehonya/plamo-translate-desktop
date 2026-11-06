@@ -504,7 +504,7 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 - The extension's ID (`bcagbgackmnblhlofmpcmjfkfhhogpmh`) follows from the public key in its manifest, so the unpacked extension always has it.
   A Chrome Web Store release would get another ID, which must be added to `EXTENSION_IDS`.
 - Protocol (`crates/host/src/protocol.rs`): length-prefixed JSON both ways.
-  - Requests: `translate { id, text, target (code or auto), source, style }`, `translate_segments { id, segments, … }`, `cancel`, `status`, `options`,
+  - Requests: `translate { id, text, target (code or auto), source, style }`, `translate_segments { id, segments, … }`, `cancel { id }` (the id is optional), `status`, `options`,
     and `configure { model, device }` (the extension's own choices; absent fields follow the app).
   - Responses: `status` (starting, loading, ready, no_model, error), `options` (downloaded models, devices, and the current choices),
     `started`, `progress`, `text`, `segment { index, text }`, `rewind` (a UTF-16 length, as JavaScript counts),
@@ -548,6 +548,9 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
   - wllama is vendored in `extension/vendor/wllama`, built from source by `.github/workflows/wllama.yml` (`scripts/vendor-wllama.sh`):
     its npm releases (3.8.1) bundle a llama.cpp that predates the PLaMo 3 tokenizer (`plamo3`, which adds pre-segmentation to `plamo2`).
     Once a release bundles a newer one, it can be vendored instead. The build uses Memory64 and JSPI, hence Chrome 137 or later.
+    It applies `patches/wllama`: `cache-ram.patch` adds the `cache_ram_mib` load parameter, with which the engine disables
+    llama.cpp's prompt cache. That cache copies the KV state of the prompts a slot moves on from into memory, up to 8 GiB by default,
+    past WebAssembly's 4 GiB: once it got that far, allocations failed (`std::bad_alloc`) and inference aborted.
   - Pages are cross-origin isolated (manifest `cross_origin_embedder_policy`/`cross_origin_opener_policy`) for WebAssembly threads,
     and the CSP allows `'wasm-unsafe-eval'`.
   - Models: the 0.8B and 2B Q4_K_M files of the app's catalog (WebAssembly's memory is limited to 4 GB), downloaded from Hugging Face
@@ -564,12 +567,25 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
   - The status reports the device llama.cpp really uses, from its messages while loading (the WebGPU adapter, at the log level, and
     the layers offloaded, at the debug level): without an adapter in wllama's worker it computes on the CPU, and `auto` then does not
     count the GPU's measurement. On the CPU, `configure { threads }` sets wllama's `n_threads` (the panel offers powers of two up to the logical cores).
-  - Speeds in the panel: the pieces of text received (one token each, from either engine) over the time since the first;
-    for page translation the background divides each batch's tokens by its time from `started` to `done`.
+  - Page batches run side by side, four at once (`slots` in the engine's status; the app's host runs one): llama.cpp decodes their
+    tokens together, which costs little more per step than one. Each batch keeps its order and its own history, so the prompts are
+    the ones a lone batch would get; the outputs differ only where batched kernels round differently (a word here and there).
+    - The engine loads four slots of `N_CTX` tokens, each with its own KV cache (`kv_unified: false`): with one cache shared by all
+      (wllama's default), every step attends over all the sequences, and two concurrent translations ran five times slower than one.
+    - Segments are generated without streaming. Each poll for a result runs one step of llama.cpp's loop, and a stream polls once
+      per token, so streamed batches took as many steps side by side as one after another.
+    - A panel translation stops all the batches (they are sent again after it), so it runs alone at full speed.
+      `cancel` takes the job's `id`; the app's host ignores it.
+    - Measured on a Radeon RX 9070 XT with 80 paragraphs, from the model loaded to the last: 2B 66 s one batch at a time, 53 s
+      side by side; replaying the same flow, 0.8B 48 s and 34 s, and on the CPU 102 s and 91 s. The prompts, which batching does not
+      speed up, take about half the time (WebGPU reads 2B prompts at about 180 tok/s).
+  - Speeds in the panel: the pieces of text received (one token each, from either engine) over the time since the first.
+    For page translation, the background counts the tokens of the page's batches (each `segment` of the in-browser engine carries
+    its tokens; the app's host reports them in `done`) over the time since its first batch started.
     The background also reports the tabs whose page translation runs (`pages`), so the panel's page button stops the active tab's.
   - On WebGPU, 0.8B and 2B differ little in speed (12.2 and 14.5 ms per token): a fixed cost per token dominates, the 600–900
     dispatches of the graph each crossing to the GPU process and the logits read back before the next token, while native code
-    reads them from mapped memory in microseconds. Decoding several sequences at once would share that cost (later work).
+    reads them from mapped memory in microseconds. Decoding page batches side by side shares that cost.
   - Measured with 2B Q4_K_M: Radeon 8060S 48 tok/s, Radeon RX 9070 XT 67 (native Vulkan 246), CPU of a Ryzen 9 9950X 18 (native 20);
     prompts on the CPU at about 33 tok/s (native 250). Chrome uses the GPU Windows assigns to it: on a PC whose display runs on the
     integrated GPU, the graphics settings must give Chrome the discrete one.

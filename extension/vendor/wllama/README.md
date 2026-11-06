@@ -9,5 +9,9 @@ bundle a llama.cpp that predates the PLaMo 3 tokenizer:
 - wllama 3.12.0, commit c10c21114984e37fe6ba4edbba446c28c5b7a954
 - llama.cpp commit d38bea34227bbf9069d62fdc239c98ab6e05435a
 
-`wllama.js` is wllama's `esm/index.js` and `wllama.wasm` its `esm/wasm/wllama.wasm`, unmodified.
+with these patches from `patches/wllama`:
+
+- cache-ram.patch
+
+`wllama.js` is wllama's `esm/index.js` and `wllama.wasm` its `esm/wasm/wllama.wasm`.
 To update, run the workflow and replace this folder with its artifact.
