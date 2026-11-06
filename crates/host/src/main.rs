@@ -344,7 +344,12 @@ impl Host {
             });
             return settings;
         }
-        let device = devices::resolve(&device_setting, devices.as_deref().unwrap_or_default());
+        // The host does not measure devices; it uses what the app measured.
+        let device = devices::resolve(
+            &device_setting,
+            settings.backend.measured.as_ref(),
+            devices.as_deref().unwrap_or_default(),
+        );
         let device_label = devices::device_label(device);
         app_log!("loading {} on {device_label}", path.display());
         self.set_status(Status {
@@ -618,6 +623,9 @@ fn on_event(shared: &(Mutex<Shared>, Condvar), out: &Output, event: Event) {
                 );
             }
         }
-        Event::LoadProgress(_) | Event::Retry { .. } => {}
+        Event::LoadProgress(_)
+        | Event::Retry { .. }
+        | Event::Measuring { .. }
+        | Event::Measured(_) => {}
     }
 }

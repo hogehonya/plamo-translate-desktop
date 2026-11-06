@@ -10,9 +10,11 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
   - On the NPU the context is 8192 tokens (long texts are translated in correspondingly smaller chunks), since its graphs have fixed shapes.
   - The first translation after loading a model compiles it for the NPU, which takes a while; the compiled graphs are cached in `openvino-cache` in the data folder, so later starts are faster.
   - The NPU is for using less power and leaving the GPU free rather than for speed. On a Core Ultra 7 356H, 2B translates at about 30 tokens/s on the NPU, 40 on the CPU, and 70 on the integrated GPU.
+- **Measure and choose** next to the device in Settings: translates a short text with the current model on the CPU and each GPU, shows their speeds, and makes Automatic use the fastest. Useful after a hardware change.
 
 ### Changed
 
+- On a PC with an integrated GPU and no discrete one, the first model load measures whether the CPU or the integrated GPU is faster, and Automatic uses that one (it used to take the CPU). The status bar says that this happens on the first start only. Integrated GPUs range from much slower than the CPU to much faster, such as the Radeon 8060S of Ryzen AI Max processors.
 - With the device set to CPU, translation runs on the CPU only. llama.cpp used to hand large operations to a GPU as well.
 
 ### Fixed

@@ -1,16 +1,21 @@
 //! Inference device and context settings.
 
-pub use appdata::devices::{device_label, model_options, resolve, session_options};
+pub use appdata::devices::{
+    candidates, choose, device_label, first_measurement, model_options, resolve, session_options,
+};
 use engine::llama::{Device, DeviceKind};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::lang::{self, Choice};
 use crate::models::format_bytes;
-use crate::settings::{BackendSettings, DeviceSetting};
+use crate::settings::{BackendSettings, DeviceSetting, MeasuredChoice};
 
 /// Memory available to the model on `device`, or system memory for the CPU.
 pub fn available_memory(device: Option<&Device>, devices: &[Device]) -> u64 {
@@ -31,7 +36,10 @@ pub fn estimate_required(model_bytes: u64) -> u64 {
 }
 
 pub enum BackendEvent {
-    Changed(BackendSettings),
+    /// The device setting changed.
+    Changed(DeviceSetting),
+    /// Measure the devices with the active model and choose the fastest automatically.
+    Measure,
 }
 
 type DeviceSelect = SelectState<Vec<Choice<DeviceSetting>>>;
@@ -39,8 +47,11 @@ type DeviceSelect = SelectState<Vec<Choice<DeviceSetting>>>;
 pub struct BackendPanel {
     settings: BackendSettings,
     devices: Vec<Device>,
-    /// Size of the active model file, for the memory check.
+    /// Size of the active model file, for the memory check. `None` without a model, which also
+    /// means nothing to measure with.
     model_bytes: Option<u64>,
+    /// A measurement is running.
+    measuring: bool,
     device_select: Entity<DeviceSelect>,
     _subscriptions: Vec<Subscription>,
 }
@@ -49,7 +60,7 @@ impl EventEmitter<BackendEvent> for BackendPanel {}
 
 impl BackendPanel {
     pub fn new(settings: BackendSettings, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let device_choices = device_choices(&[]);
+        let device_choices = device_choices(&[], None);
         let selected = lang::position(&device_choices, &settings.device).map(IndexPath::new);
         let device_select = cx.new(|cx| {
             SelectState::new(
@@ -67,7 +78,7 @@ impl BackendPanel {
                         && *device != this.settings.device
                     {
                         this.settings.device = device.clone();
-                        cx.emit(BackendEvent::Changed(this.settings.clone()));
+                        cx.emit(BackendEvent::Changed(device.clone()));
                         cx.notify();
                     }
                 }),
@@ -77,6 +88,7 @@ impl BackendPanel {
             settings,
             devices: Vec::new(),
             model_bytes: None,
+            measuring: false,
             device_select,
             _subscriptions: subscriptions,
         }
@@ -88,7 +100,7 @@ impl BackendPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let choices = device_choices(&devices);
+        let choices = device_choices(&devices, self.settings.measured.as_ref());
         let current = self.settings.device.clone();
         let known = lang::position(&choices, &current).is_some();
         self.devices = devices;
@@ -117,10 +129,30 @@ impl BackendPanel {
         self.model_bytes = bytes;
         cx.notify();
     }
+
+    /// Takes settings changed elsewhere, such as by a measurement.
+    pub fn set_settings(
+        &mut self,
+        settings: BackendSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings = settings;
+        let devices = std::mem::take(&mut self.devices);
+        self.set_devices(devices, window, cx);
+    }
+
+    pub fn set_measuring(&mut self, measuring: bool, cx: &mut Context<Self>) {
+        self.measuring = measuring;
+        cx.notify();
+    }
 }
 
-fn device_choices(devices: &[Device]) -> Vec<Choice<DeviceSetting>> {
-    let auto_target = resolve(&DeviceSetting::Auto, devices);
+fn device_choices(
+    devices: &[Device],
+    measured: Option<&MeasuredChoice>,
+) -> Vec<Choice<DeviceSetting>> {
+    let auto_target = resolve(&DeviceSetting::Auto, measured, devices);
     let mut choices = vec![
         Choice::new(
             DeviceSetting::Auto,
@@ -153,7 +185,31 @@ fn device_choices(devices: &[Device]) -> Vec<Choice<DeviceSetting>> {
 impl Render for BackendPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let warning = cx.theme().warning;
-        let device = resolve(&self.settings.device, &self.devices);
+        let muted = cx.theme().muted_foreground;
+        let measured = self.settings.measured.as_ref();
+        let device = resolve(&self.settings.device, measured, &self.devices);
+        // The last measurement, while it holds for these devices.
+        let results = measured
+            .filter(|m| {
+                !self.devices.is_empty() && m.hardware == appdata::devices::hardware(&self.devices)
+            })
+            .map(|m| {
+                let results = m
+                    .results
+                    .iter()
+                    .map(|r| match r.tokens_per_second {
+                        Some(speed) => t!(
+                            "backend.measured_speed",
+                            name = r.name,
+                            speed = format!("{speed:.0}")
+                        )
+                        .into_owned(),
+                        None => t!("backend.measured_failed", name = r.name).into_owned(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                t!("backend.measured", results = results).into_owned()
+            });
         let available = available_memory(device, &self.devices);
         let memory_warning = self.model_bytes.and_then(|bytes| {
             let required = estimate_required(bytes);
@@ -179,8 +235,27 @@ impl Render for BackendPanel {
                         Select::new(&self.device_select)
                             .w(px(420.))
                             .menu_width(px(480.)),
+                    )
+                    .child(
+                        Button::new("measure-devices")
+                            .small()
+                            .label(if self.measuring {
+                                t!("backend.measuring").into_owned()
+                            } else {
+                                t!("backend.measure").into_owned()
+                            })
+                            .tooltip(t!("backend.measure_tooltip").into_owned())
+                            .disabled(
+                                self.measuring
+                                    || self.model_bytes.is_none()
+                                    || self.devices.is_empty(),
+                            )
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(BackendEvent::Measure))),
                     ),
             )
+            .when_some(results, |this, text| {
+                this.child(div().text_xs().text_color(muted).child(text))
+            })
             .when_some(memory_warning, |this, text| {
                 this.child(div().text_xs().text_color(warning).child(text))
             })
@@ -192,6 +267,13 @@ mod tests {
     use engine::llama::{Device, DeviceKind};
 
     use super::{DeviceSetting, estimate_required, resolve};
+
+    fn resolve_unmeasured<'a>(
+        setting: &DeviceSetting,
+        devices: &'a [Device],
+    ) -> Option<&'a Device> {
+        resolve(setting, None, devices)
+    }
 
     fn device(index: usize, name: &str, kind: DeviceKind, free_gb: u64) -> Device {
         Device {
@@ -213,16 +295,18 @@ mod tests {
             device(2, "Vulkan1", DeviceKind::IntegratedGpu, 32),
         ];
         assert_eq!(
-            resolve(&DeviceSetting::Auto, &devices).unwrap().name,
+            resolve_unmeasured(&DeviceSetting::Auto, &devices)
+                .unwrap()
+                .name,
             "Vulkan0"
         );
-        assert!(resolve(&DeviceSetting::Cpu, &devices).is_none());
+        assert!(resolve_unmeasured(&DeviceSetting::Cpu, &devices).is_none());
         let igpu = DeviceSetting::Device("Vulkan1".into());
-        assert_eq!(resolve(&igpu, &devices).unwrap().name, "Vulkan1");
+        assert_eq!(resolve_unmeasured(&igpu, &devices).unwrap().name, "Vulkan1");
         let gone = DeviceSetting::Device("CUDA0".into());
-        assert_eq!(resolve(&gone, &devices).unwrap().name, "Vulkan0");
-        // Without a discrete GPU, automatic means the CPU.
-        assert!(resolve(&DeviceSetting::Auto, &devices[..1]).is_none());
+        assert_eq!(resolve_unmeasured(&gone, &devices).unwrap().name, "Vulkan0");
+        // Without a discrete GPU (and unmeasured), automatic means the CPU.
+        assert!(resolve_unmeasured(&DeviceSetting::Auto, &devices[..1]).is_none());
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub fn settings_path() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("settings.json"))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Catalog id of the selected model.
@@ -166,24 +166,48 @@ fn supported_locale(requested: &str) -> Option<&'static str> {
 }
 
 /// Where and how the model runs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BackendSettings {
     pub device: DeviceSetting,
+    /// The fastest device measured on this machine, which [`DeviceSetting::Auto`] uses while
+    /// the devices are the same (see `crate::devices`).
+    pub measured: Option<MeasuredChoice>,
 }
 
 impl Default for BackendSettings {
     fn default() -> Self {
         Self {
             device: DeviceSetting::Auto,
+            measured: None,
         }
     }
+}
+
+/// The result of measuring the devices.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeasuredChoice {
+    /// The devices measured, which the choice holds for (see `crate::devices::hardware`).
+    pub hardware: String,
+    /// The fastest: a device name such as `Vulkan0`, or `None` for the CPU.
+    pub device: Option<String>,
+    /// Each device's speed, for showing.
+    pub results: Vec<MeasuredDevice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeasuredDevice {
+    /// A device name, or `CPU`.
+    pub name: String,
+    /// Generation speed in tokens per second, or `None` if the model did not run there.
+    pub tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "name")]
 pub enum DeviceSetting {
-    /// The discrete GPU with the most free memory, else the CPU.
+    /// The measured fastest device (see [`BackendSettings::measured`]), else the discrete GPU
+    /// with the most free memory, else the CPU.
     #[default]
     Auto,
     Cpu,

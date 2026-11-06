@@ -9,7 +9,7 @@ use engine::StopReason;
 use engine::llama::{Device, RuntimeOptions};
 use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use engine::pfml::{GlossaryEntry, LangCode, TranslationOptions};
-use engine::worker::{Event, JobId, LoadRequest, Worker};
+use engine::worker::{Event, JobId, LoadRequest, MeasureRequest, Worker};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{
@@ -32,7 +32,7 @@ use crate::browser;
 use crate::glossary;
 use crate::lang::{self, Choice, SourceChoice, StyleChoice, TargetChoice};
 use crate::models::{ModelsEvent, ModelsPanel};
-use crate::settings::{self, DocumentSettings, Settings, ThemeSetting, UiLanguage};
+use crate::settings::{self, DeviceSetting, DocumentSettings, Settings, ThemeSetting, UiLanguage};
 
 actions!(translator, [CopyTranslation]);
 
@@ -308,6 +308,13 @@ enum Status {
     NoModel,
     Unloaded,
     Loading(f32),
+    /// Measuring device `step` of `count` before a load: on the first start (`first`), or
+    /// because the settings asked.
+    Measuring {
+        first: bool,
+        step: usize,
+        count: usize,
+    },
     Ready,
     Translating {
         target: &'static str,
@@ -404,6 +411,10 @@ pub struct TranslatorView {
     pending_loads: usize,
     /// Set when llama.cpp could not start; nothing can load after that.
     runtime_error: Option<String>,
+    /// A device measurement is running: `Some(true)` for the first start's. Loads wait for it.
+    measuring: Option<bool>,
+    /// The settings asked to measure the devices with the next load.
+    measure_requested: bool,
     /// The shown translation was stopped or failed part-way, so it neither satisfies a repeated
     /// request nor goes into the cache.
     shown_partial: bool,
@@ -679,6 +690,8 @@ impl TranslatorView {
             paste_pending: false,
             pending_loads: 0,
             runtime_error: None,
+            measuring: None,
+            measure_requested: false,
             shown_partial: false,
             browser: (browser::Registration::NotRegistered, None),
             copied: false,
@@ -858,7 +871,46 @@ impl TranslatorView {
         let Some(devices) = &self.devices else {
             return;
         };
-        let device = backend::resolve(&self.settings.backend.device, devices);
+        // The measurement's result decides the device; it loads the model afterwards.
+        if let Some(first) = self.measuring {
+            self.status = Status::Measuring {
+                first,
+                step: 0,
+                count: 0,
+            };
+            return;
+        }
+        let measure = if self.measure_requested {
+            Some((false, backend::candidates(devices)))
+        } else {
+            backend::first_measurement(&self.settings.backend, devices).map(|c| (true, c))
+        };
+        if let Some((first, candidates)) = measure {
+            crate::app_log!(
+                "measuring {} device(s) with {}",
+                candidates.len(),
+                path.display()
+            );
+            self.measure_requested = false;
+            self.measuring = Some(first);
+            self.status = Status::Measuring {
+                first,
+                step: 0,
+                count: candidates.len(),
+            };
+            self.backend
+                .update(cx, |backend, cx| backend.set_measuring(true, cx));
+            self.worker.measure(MeasureRequest {
+                path,
+                devices: candidates,
+            });
+            return;
+        }
+        let device = backend::resolve(
+            &self.settings.backend.device,
+            self.settings.backend.measured.as_ref(),
+            devices,
+        );
         self.loaded_on = Some(backend::device_label(device));
         crate::app_log!(
             "loading {} on {}",
@@ -878,7 +930,11 @@ impl TranslatorView {
         let Some(devices) = &self.devices else {
             return;
         };
-        let device = backend::resolve(&self.settings.backend.device, devices);
+        let device = backend::resolve(
+            &self.settings.backend.device,
+            self.settings.backend.measured.as_ref(),
+            devices,
+        );
         let recommended = catalog::recommend(backend::available_memory(device, devices));
         self.models
             .update(cx, |models, cx| models.set_recommended(recommended, cx));
@@ -891,10 +947,14 @@ impl TranslatorView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let BackendEvent::Changed(backend) = event;
-        self.settings.backend = backend.clone();
-        self.settings.save();
-        self.update_recommendation(cx);
+        match event {
+            BackendEvent::Changed(device) => {
+                self.settings.backend.device = device.clone();
+                self.settings.save();
+                self.update_recommendation(cx);
+            }
+            BackendEvent::Measure => self.measure_requested = true,
+        }
         self.start_load(cx);
     }
 
@@ -1417,6 +1477,56 @@ impl TranslatorView {
                     }
                 }
             }
+            Event::Measuring { index, count } => {
+                if let Some(first) = self.measuring {
+                    self.status = Status::Measuring {
+                        first,
+                        step: index + 1,
+                        count,
+                    };
+                }
+            }
+            Event::Measured(results) => {
+                let requested = self.measuring.take() == Some(false);
+                self.backend
+                    .update(cx, |backend, cx| backend.set_measuring(false, cx));
+                let Some(devices) = &self.devices else {
+                    return;
+                };
+                let choice = backend::choose(&results, devices);
+                for (result, measured) in results.iter().zip(&choice.results) {
+                    match &result.result {
+                        Ok(speed) => crate::app_log!(
+                            "measured {}: prompt {:.0} tok/s, generation {:.1} tok/s",
+                            measured.name,
+                            speed.prompt_tokens_per_second,
+                            speed.generation_tokens_per_second
+                        ),
+                        Err(e) => crate::app_log!("measured {}: failed: {e}", measured.name),
+                    }
+                }
+                crate::app_log!(
+                    "automatic device: {}",
+                    choice.device.as_deref().unwrap_or("CPU")
+                );
+                self.settings.backend.measured = Some(choice);
+                // Measuring from the settings asks for the fastest: automatic selection.
+                if requested {
+                    self.settings.backend.device = DeviceSetting::Auto;
+                }
+                self.settings.save();
+                let settings = self.settings.backend.clone();
+                self.backend
+                    .update(cx, |backend, cx| backend.set_settings(settings, window, cx));
+                self.update_recommendation(cx);
+                self.start_load(cx);
+            }
+            // A load sent before the measurement: the model is released for it, and loaded
+            // again after it.
+            Event::Loaded(_) | Event::LoadFailed(_) if self.measuring.is_some() => {
+                self.pending_loads = self.pending_loads.saturating_sub(1);
+                return;
+            }
             Event::Loaded(_) | Event::LoadFailed(_) if self.pending_loads > 1 => {
                 // A newer load follows.
                 self.pending_loads -= 1;
@@ -1439,6 +1549,9 @@ impl TranslatorView {
             Event::RuntimeFailed(e) => {
                 crate::app_log!("inference runtime failed: {e}");
                 self.runtime_error = Some(e.clone());
+                self.measuring = None;
+                self.backend
+                    .update(cx, |backend, cx| backend.set_measuring(false, cx));
                 self.model_ready = false;
                 self.current_job = None;
                 self.status = Status::Error(e);
@@ -1816,6 +1929,14 @@ impl TranslatorView {
             Status::Unloaded => t!("status.unloaded").into_owned(),
             Status::Loading(p) => {
                 t!("status.loading", percent = format!("{:.0}", p * 100.0)).into_owned()
+            }
+            Status::Measuring { first, step, count } => {
+                let key = if *first {
+                    "status.measuring_first"
+                } else {
+                    "status.measuring"
+                };
+                t!(key, step = step.max(&1), count = count.max(&1)).into_owned()
             }
             Status::Ready => t!("status.ready").into_owned(),
             Status::Translating { target, chunk } => {

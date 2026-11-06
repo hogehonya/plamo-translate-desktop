@@ -68,6 +68,9 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
     ```
 
 On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
+On a PC with an integrated GPU and no discrete one, the first model load measures whether the CPU or the integrated GPU translates faster
+(integrated GPUs range from much slower to much faster), and Automatic uses the faster one.
+**Measure and choose** next to the device in Settings measures all of them again, for example after a hardware change.
 
 ## Browser extension
 

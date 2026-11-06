@@ -290,7 +290,18 @@ The implementation is `engine::llama::Session` (one llama.cpp context of a loade
   - `Vulkan1 — AMD Radeon(TM) Graphics`
 - The first model load waits for this list.
 - The device setting is saved as one of three values:
-  - `auto` (the default) picks the discrete GPU with the most free memory, or the CPU if there is none. Integrated GPUs are never picked automatically.
+  - `auto` (the default) picks the fastest device measured on this machine (`measured` in the settings), as long as the devices
+    (CPU, discrete and integrated GPUs, by name and description) are the ones measured. Without a measurement it picks
+    the discrete GPU with the most free memory, or the CPU if there is none. NPUs are never picked automatically.
+  - Integrated GPUs range from much slower than the CPU (Ryzen 9 9950X's 2-CU Radeon: 6.6 against 17.4 tok/s for 2B) to much faster
+    (Core Ultra 7 356H: 70 against 40; Ryzen AI Max+ 395's Radeon 8060S). So with an integrated GPU and no discrete one,
+    the first load on `auto` measures first: the worker loads the model on the CPU and on each GPU in turn
+    (`Worker::measure`), translates a fixed paragraph (twice on a GPU, the first run compiling its kernels), and reports the speeds.
+    The device that would translate a typical piece (200 prompt and 100 generated tokens) fastest is saved, and the model loads.
+    The status bar says that this happens on the first start only.
+  - **Measure and choose** in Settings measures all candidates with the active model at any time and sets the device to `auto`.
+    The last results are shown under the device while they hold. `translate --measure` prints the same measurement.
+  - The browser host does not measure; it uses the app's measurement.
   - `cpu`.
   - A device name such as `Vulkan0`. If that device disappears, the app falls back to `auto`.
 - The model is fully offloaded to the selected GPU. Partial offload (GPU layers) is a possible later setting.

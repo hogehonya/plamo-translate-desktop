@@ -14,11 +14,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use pfml::TranslationOptions;
 
 use crate::document::{DocumentOptions, Output, Progress, translate_document, translate_segments};
-use crate::llama::{Device, Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
+use crate::llama::{
+    Device, GpuOffload, Model, ModelOptions, Runtime, RuntimeOptions, SessionOptions,
+};
 use crate::{StopReason, TranslateStats};
 
 /// Identifies a translation job. Ids increase monotonically per worker.
@@ -29,6 +32,37 @@ pub struct LoadRequest {
     pub path: PathBuf,
     pub model: ModelOptions,
     pub session: SessionOptions,
+}
+
+/// Compares how fast `devices` translate with the model at `path` (see [`Worker::measure`]).
+#[derive(Debug, Clone)]
+pub struct MeasureRequest {
+    pub path: PathBuf,
+    /// ggml device indices, or `None` for the CPU.
+    pub devices: Vec<Option<usize>>,
+}
+
+/// How fast one device translated the measurement text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Measurement {
+    /// ggml device index, or `None` for the CPU.
+    pub device: Option<usize>,
+    /// The speed, or why the model could not run there.
+    pub result: Result<Speed, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Speed {
+    pub prompt_tokens_per_second: f64,
+    pub generation_tokens_per_second: f64,
+}
+
+impl Speed {
+    /// Seconds for a typical piece of a long text: 200 prompt tokens (the piece and some
+    /// history) and 100 generated ones.
+    pub fn typical_seconds(&self) -> f64 {
+        200.0 / self.prompt_tokens_per_second + 100.0 / self.generation_tokens_per_second
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +85,14 @@ pub enum Event {
     LoadFailed(String),
     /// The model was released after an unload request; its file is no longer open.
     Unloaded,
+    /// A measurement started on device `index` of `count` (see [`Worker::measure`]).
+    Measuring {
+        index: usize,
+        count: usize,
+    },
+    /// The measurement ended, with one result per device in the order requested. No model is
+    /// loaded afterwards.
+    Measured(Vec<Measurement>),
     /// A long text was split; chunk `index` of `count` is starting. `source` is its byte range
     /// in the text.
     Chunk {
@@ -106,6 +148,7 @@ pub enum Event {
 
 enum Command {
     Load(LoadRequest),
+    Measure(MeasureRequest),
     Unload,
     Translate {
         job: JobId,
@@ -166,6 +209,14 @@ impl Worker {
     pub fn unload(&self) {
         self.cancel();
         self.send(Command::Unload);
+    }
+
+    /// Unloads the model and translates a fixed text with it on each of the request's devices
+    /// in turn, reporting [`Event::Measuring`] for each and then [`Event::Measured`]. Cancels
+    /// any running job; load a model afterwards to translate again.
+    pub fn measure(&self, request: MeasureRequest) {
+        self.cancel();
+        self.send(Command::Measure(request));
     }
 
     /// Starts a translation, cancelling any earlier one. Returns the new job id.
@@ -245,6 +296,9 @@ fn run(
                     }
                 }
             }
+            Command::Measure(request) => {
+                events(Event::Measured(measure(&runtime, &request, &events)))
+            }
             Command::Unload => events(Event::Unloaded),
             Command::Translate { job, .. } | Command::TranslateSegments { job, .. } => {
                 events(Event::Failed {
@@ -298,7 +352,7 @@ fn serve(
     loop {
         let command = commands.recv().ok()?;
         let job = match &command {
-            Command::Load(_) => return Some(command),
+            Command::Load(_) | Command::Measure(_) => return Some(command),
             Command::Unload => return None,
             Command::Translate { job, .. } | Command::TranslateSegments { job, .. } => *job,
         };
@@ -378,7 +432,9 @@ fn serve(
                 &mut |index, text| events(Event::Segment { job, index, text }),
                 &is_cancelled,
             ),
-            Command::Load(_) | Command::Unload => unreachable!("handled above"),
+            Command::Load(_) | Command::Measure(_) | Command::Unload => {
+                unreachable!("handled above")
+            }
         };
         events(match result {
             Ok(stats) => Event::Finished { job, stats },
@@ -388,4 +444,75 @@ fn serve(
             },
         });
     }
+}
+
+/// The text translated to measure a device: a short paragraph, as typed or pasted.
+const MEASURE_TEXT: &str = "The meeting has been moved to next Monday afternoon. Please let the other \
+members of the team know, and bring the revised budget and the schedule for the spring release \
+with you, so that we can agree on the priorities before the end of the month.";
+
+/// Measures each device of `request` (see [`Worker::measure`]).
+fn measure(runtime: &Runtime, request: &MeasureRequest, events: &EventSink) -> Vec<Measurement> {
+    let count = request.devices.len();
+    request
+        .devices
+        .iter()
+        .enumerate()
+        .map(|(index, &device)| {
+            events(Event::Measuring { index, count });
+            Measurement {
+                device,
+                result: measure_device(runtime, &request.path, device),
+            }
+        })
+        .collect()
+}
+
+fn measure_device(
+    runtime: &Runtime,
+    path: &std::path::Path,
+    device: Option<usize>,
+) -> Result<Speed, String> {
+    let options = ModelOptions {
+        gpu: device.map(|device| GpuOffload {
+            device,
+            layers: None,
+        }),
+    };
+    let model = runtime
+        .load_model(path, &options, |_| true)
+        .map_err(|e| e.to_string())?;
+    // A short context is enough for the text and is quicker to set up.
+    let session_options = SessionOptions {
+        n_ctx: 4096,
+        ..SessionOptions::default().with_auto_threads()
+    };
+    let mut session = model
+        .session(runtime, &session_options)
+        .map_err(|e| e.to_string())?;
+    let options = TranslationOptions::new(pfml::LangCode::new("ja").expect("a valid code"));
+    let mut translate = || {
+        translate_document(
+            &mut session,
+            &|s: &str| model.count_tokens(s),
+            4096,
+            &DocumentOptions::default(),
+            &options,
+            MEASURE_TEXT,
+            &mut |_| {},
+            &mut |_| {},
+            &|| false,
+        )
+        .map_err(|e| e.to_string())
+    };
+    // On a GPU the first run includes one-time work, such as compiling kernels.
+    if device.is_some() {
+        translate()?;
+    }
+    let stats = translate()?;
+    let rate = |tokens: usize, duration: Duration| tokens as f64 / duration.as_secs_f64().max(1e-6);
+    Ok(Speed {
+        prompt_tokens_per_second: rate(stats.prompt_tokens, stats.prompt_duration),
+        generation_tokens_per_second: rate(stats.generated_tokens, stats.generation_duration),
+    })
 }

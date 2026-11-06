@@ -73,6 +73,12 @@ action.auto_translate:
 status.loading:
   en: "Loading model… %{percent}%"
   ja: "モデルを読み込み中… %{percent}%"
+status.measuring_first:
+  en: "Finding the fastest device on this PC (first start only)… %{step}/%{count}"
+  ja: "この PC で一番速いデバイスを調べています（初回のみ）… %{step}/%{count}"
+status.measuring:
+  en: "Measuring the devices… %{step}/%{count}"
+  ja: "デバイスの速さを測っています… %{step}/%{count}"
 status.ready:
   en: Ready
   ja: 準備完了
@@ -141,6 +147,24 @@ backend.cpu:
 backend.device_choice:
   en: "%{name} — %{description} (%{free} free)"
   ja: "%{name} — %{description}（空き %{free}）"
+backend.measure:
+  en: Measure and choose
+  ja: 速さを測って選ぶ
+backend.measuring:
+  en: Measuring…
+  ja: 測定中…
+backend.measure_tooltip:
+  en: "Translates a short text with the current model on the CPU and each GPU, and makes Automatic use the fastest. Takes from a few seconds to a minute."
+  ja: "今のモデルで CPU と各 GPU に短い文章を訳させ、一番速いものを「自動」で使うようにします。数秒から 1 分ほどかかります。"
+backend.measured:
+  en: "Measured: %{results}"
+  ja: "測定結果: %{results}"
+backend.measured_speed:
+  en: "%{name} %{speed} tokens/s"
+  ja: "%{name} 毎秒 %{speed} トークン"
+backend.measured_failed:
+  en: "%{name} did not run"
+  ja: "%{name} は動作せず"
 backend.memory_warning:
   en: "This model may not fit on %{device}: it needs about %{required}, and %{available} is free."
   ja: "このモデルは %{device} に収まらない可能性があります（必要量 約 %{required}、空き %{available}）。"

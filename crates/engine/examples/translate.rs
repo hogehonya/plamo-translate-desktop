@@ -18,6 +18,7 @@ use engine::llama::{
     DeviceKind, GpuOffload, ModelOptions, Runtime, RuntimeOptions, SessionOptions,
 };
 use engine::pfml::{Form, GlossaryEntry, LangCode, Prompt, TranslationOptions};
+use engine::worker::{Event, MeasureRequest, Worker};
 
 const USAGE: &str = "\
 usage: translate [options] [TEXT]
@@ -41,6 +42,8 @@ options:
                       cache), as used with --gpu on an NPU; for testing OpenVINO's static path
                       elsewhere with GGML_OPENVINO_FORCE_STATIC=1
   --list-devices      list compute devices and exit
+  --measure           measure how fast the CPU and each GPU translate with --model, as the
+                      app's Measure and choose button does, and exit
   --check-tokenizer   verify segment tokenization matches raw prompt tokenization
   --verbose           show llama.cpp logs
 ";
@@ -63,6 +66,7 @@ struct Args {
     gpu_layers: Option<u32>,
     npu_session: bool,
     list_devices: bool,
+    measure: bool,
     check_tokenizer: bool,
     verbose: bool,
     text: Option<String>,
@@ -103,6 +107,7 @@ fn parse_args() -> anyhow::Result<Args> {
             "--gpu-layers" => args.gpu_layers = Some(value()?.parse()?),
             "--npu-session" => args.npu_session = true,
             "--list-devices" => args.list_devices = true,
+            "--measure" => args.measure = true,
             "--check-tokenizer" => args.check_tokenizer = true,
             "--verbose" => args.verbose = true,
             "-h" | "--help" => {
@@ -126,6 +131,10 @@ fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(|_| "info".into()),
             )
             .init();
+    }
+    if args.measure {
+        let model = args.model.context("--model is required")?;
+        return measure(model, args.verbose);
     }
     let runtime = Runtime::init(RuntimeOptions { logs: args.verbose })?;
 
@@ -313,4 +322,57 @@ fn main() -> anyhow::Result<()> {
         stats.cut,
     );
     Ok(())
+}
+
+/// Measures the CPU and each GPU with the worker, as the app does, and prints the speeds.
+fn measure(model: PathBuf, logs: bool) -> anyhow::Result<()> {
+    let (events, received) = std::sync::mpsc::channel();
+    let worker = Worker::spawn(RuntimeOptions { logs }, move |event| {
+        let _ = events.send(event);
+    });
+    let devices = loop {
+        match received.recv()? {
+            Event::Devices(devices) => break devices,
+            Event::RuntimeFailed(error) => bail!(error),
+            _ => {}
+        }
+    };
+    // The app's candidates (appdata::devices::candidates): the CPU and the GPUs.
+    let candidates: Vec<Option<usize>> = std::iter::once(None)
+        .chain(
+            devices
+                .iter()
+                .filter(|d| matches!(d.kind, DeviceKind::Gpu | DeviceKind::IntegratedGpu))
+                .map(|d| Some(d.index)),
+        )
+        .collect();
+    worker.measure(MeasureRequest {
+        path: model,
+        devices: candidates,
+    });
+    loop {
+        match received.recv()? {
+            Event::Measuring { index, count } => eprintln!("[measuring {}/{count}]", index + 1),
+            Event::Measured(results) => {
+                for m in results {
+                    let name = m
+                        .device
+                        .and_then(|index| devices.iter().find(|d| d.index == index))
+                        .map_or("CPU", |d| d.name.as_str());
+                    match m.result {
+                        Ok(speed) => println!(
+                            "{name}: prompt {:.0} tok/s, generation {:.1} tok/s, a typical piece {:.2} s",
+                            speed.prompt_tokens_per_second,
+                            speed.generation_tokens_per_second,
+                            speed.typical_seconds()
+                        ),
+                        Err(error) => println!("{name}: failed: {error}"),
+                    }
+                }
+                return Ok(());
+            }
+            Event::RuntimeFailed(error) => bail!(error),
+            _ => {}
+        }
+    }
 }
