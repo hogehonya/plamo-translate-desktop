@@ -40,7 +40,8 @@ pub enum Request {
         #[serde(default)]
         style: Option<String>,
     },
-    /// Stop the running translation.
+    /// Stop the running translation. The extension's in-browser engine, which runs several page
+    /// batches at once, takes the `id` of the one to stop; this host runs one and ignores it.
     Cancel,
     /// Report the model and its state.
     Status,
@@ -199,6 +200,8 @@ mod tests {
             }
         );
         let cancel: Request = serde_json::from_str(r#"{"type":"cancel"}"#).unwrap();
+        assert_eq!(cancel, Request::Cancel);
+        let cancel: Request = serde_json::from_str(r#"{"type":"cancel","id":3}"#).unwrap();
         assert_eq!(cancel, Request::Cancel);
         let configure: Request =
             serde_json::from_str(r#"{"type":"configure","device":"cpu"}"#).unwrap();

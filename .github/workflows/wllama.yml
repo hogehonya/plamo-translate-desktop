@@ -4,7 +4,8 @@ name: wllama
 # engine, as an artifact to commit under extension/vendor/wllama (see its README.md).
 #
 # A stopgap: the npm releases of wllama (3.8.1 so far) bundle a llama.cpp that predates the
-# PLaMo 3 tokenizer. Once a release bundles a newer one, vendor that release instead.
+# PLaMo 3 tokenizer. Once a release bundles a newer one, vendor that release instead. The
+# patches in patches/wllama are applied first (see each for why).
 
 on:
   workflow_dispatch:
@@ -30,6 +31,12 @@ jobs:
           path: wllama
           submodules: recursive
           persist-credentials: false
+
+      - name: Apply the patches
+        run: |
+          for patch in patches/wllama/*.patch; do
+            git -C wllama apply --verbose "$PWD/$patch"
+          done
 
       # wllama's own build: Emscripten in Docker, with the WebGPU backend. The compatibility
       # build (without Memory64 and JSPI, for Firefox and Safari) is not needed.

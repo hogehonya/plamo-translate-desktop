@@ -41,6 +41,11 @@ const modelUrl = (model) => `https://huggingface.co/${model.repo}/resolve/${mode
 const N_CTX = 4096;
 const CHUNK_TOKENS = 512;
 const HISTORY_TOKENS = 768;
+// Page batches run side by side, up to this many: llama.cpp decodes their tokens together, which
+// costs little more per step than one. Each has its own KV cache of N_CTX: with one cache shared
+// by all (wllama's default), every step attends over all of them, which made concurrent
+// translations several times slower than one alone.
+const SLOTS = 4;
 
 // llama.cpp's WebGPU backend requests an adapter without a power preference, which gets the
 // integrated GPU beside a discrete one. wllama's worker code passes through
@@ -65,10 +70,10 @@ const post = (message) => port.postMessage(message);
 let settings = { model: "", device: "auto", threads: 0 };
 /** The model in use: { model, device, wllama }, or null. */
 let loaded = null;
-/** Settles when the current load (or measurement) ends. */
-let loading = null;
-/** The running translation: { id, controller }. */
-let job = null;
+/** Settles when the last load (or measurement) asked for ends: they run one after another. */
+let loading = Promise.resolve();
+/** The running translations by id: { id, kind, controller, running, finished }. */
+const jobs = new Map();
 // "starting" until the downloaded models are checked (see the end of this file).
 let status = { state: "starting" };
 const downloads = new Map();
@@ -213,7 +218,13 @@ async function load(model, device) {
   });
   try {
     await wllama.loadModel([file], {
-      n_ctx: N_CTX,
+      n_ctx: N_CTX * SLOTS,
+      n_parallel: SLOTS,
+      kv_unified: false,
+      // No prompt cache: it would copy the KV state of the prompts a slot moves on from into
+      // WebAssembly memory, up to 8 GiB by default, past the 4 GiB there is (allocations then
+      // fail). Each batch's requests reuse their own slot's state, which needs no copy.
+      cache_ram_mib: 0,
       n_gpu_layers: device === "gpu" ? 999 : 0,
       ...(settings.threads > 0 ? { n_threads: settings.threads } : {}),
     });
@@ -256,10 +267,15 @@ async function unload() {
 
 /**
  * Loads the selected model on the selected device. On `auto` with a GPU, the first load measures
- * the GPU and the CPU and keeps the faster one.
+ * the GPU and the CPU and keeps the faster one. Jobs starting together wait for the same load.
  */
-async function ensureLoaded() {
-  while (loading) await loading;
+function ensureLoaded() {
+  const next = loading.then(loadSelected);
+  loading = next.catch(() => {});
+  return next;
+}
+
+async function loadSelected() {
   const model = await selectedModel();
   if (!model || !(await isDownloaded(model))) {
     setStatus({ state: "no_model" });
@@ -270,25 +286,22 @@ async function ensureLoaded() {
   if (device === "gpu" && !gpu) device = "cpu";
   const hardware = `${gpu}; ${navigator.hardwareConcurrency} cores`;
   device ??= gpu ? measuredDevice(hardware) : "cpu";
-  loading = (async () => {
+  try {
     if (device) {
       await load(model, device);
-      return;
+    } else {
+      // Measure: the GPU, then the CPU, keeping the faster one loaded.
+      setStatus({ state: "measuring", model: model.label });
+      const failed = { seconds: Infinity };
+      await load(model, "gpu");
+      // Without the GPU in use, this would measure the CPU.
+      const gpuSpeed = loaded.gpu ? await measure().catch(() => failed) : failed;
+      await load(model, "cpu");
+      const cpuSpeed = await measure().catch(() => failed);
+      const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
+      localStorage.setItem("measured", JSON.stringify({ hardware, device: faster, gpu: gpuSpeed, cpu: cpuSpeed }));
+      if (faster === "gpu") await load(model, "gpu");
     }
-    // Measure: the GPU, then the CPU, keeping the faster one loaded.
-    setStatus({ state: "measuring", model: model.label });
-    const failed = { seconds: Infinity };
-    await load(model, "gpu");
-    // Without the GPU in use, this would measure the CPU.
-    const gpuSpeed = loaded.gpu ? await measure().catch(() => failed) : failed;
-    await load(model, "cpu");
-    const cpuSpeed = await measure().catch(() => failed);
-    const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
-    localStorage.setItem("measured", JSON.stringify({ hardware, device: faster, gpu: gpuSpeed, cpu: cpuSpeed }));
-    if (faster === "gpu") await load(model, "gpu");
-  })();
-  try {
-    await loading;
     // `gpuUnavailable`: WebGPU was chosen (or measured) but llama.cpp could not use it.
     setStatus({
       state: "ready",
@@ -301,35 +314,45 @@ async function ensureLoaded() {
   } catch (e) {
     setStatus({ state: "error", model: model.label, message: String(e?.message ?? e) });
     throw Object.assign(new Error(String(e?.message ?? e)), { code: "load_failed" });
-  } finally {
-    loading = null;
   }
 }
 
 // ---- Translating ----
 
-/** Starts a job, ending the running one (it reports itself cancelled). */
-async function startJob(id) {
-  const previous = job;
-  job = { id, controller: new AbortController() };
-  previous?.controller.abort();
-  // Wait for it to report done, so that messages keep their order.
-  await previous?.running;
-  return job;
+/**
+ * Starts a job, ending the ones it replaces (they report themselves cancelled): a panel
+ * translation (`translate`) replaces all the running jobs; a page batch (`segments`) replaces a
+ * panel translation and runs beside the other batches. The background sends at most SLOTS.
+ */
+async function startJob(id, kind) {
+  const previous = [...jobs.values()].filter((j) => kind === "translate" || j.kind === "translate");
+  let finished;
+  const running = new Promise((resolve) => (finished = resolve));
+  const current = { id, kind, controller: new AbortController(), running, finished };
+  jobs.set(id, current);
+  for (const j of previous) j.controller.abort();
+  // Wait for them to report done, so that messages keep their order.
+  await Promise.all(previous.map((j) => j.running));
+  return current;
 }
 
-/** Generates the translation for `text` (a prompt), streaming pieces to `onText`. */
-async function generate(current, text, maxTokens, onText) {
+/** Generates the translation for `text` (a prompt), streaming pieces to `onText` if given. */
+async function generate(current, text, maxTokens, onText = null) {
+  const options = { prompt: text, max_tokens: maxTokens, temperature: 0, stop: [STOP], abortSignal: current.controller.signal };
+  if (!onText) {
+    // Not streamed: each poll for a result runs one step of llama.cpp's loop, and a stream polls
+    // once per token, so batches streamed side by side would take as many steps as one after
+    // another. Unstreamed, their requests wait while each step decodes a token for all of them.
+    const result = await loaded.wllama.createCompletion(options);
+    const choice = result.choices?.[0];
+    return { output: choice?.text ?? "", tokens: result.timings?.predicted_n ?? 0, cut: choice?.finish_reason === "length" };
+  }
   let output = "";
   let tokens = 0;
   let finish = null;
   await loaded.wllama.createCompletion({
-    prompt: text,
-    max_tokens: maxTokens,
-    temperature: 0,
-    stop: [STOP],
+    ...options,
     stream: true,
-    abortSignal: current.controller.signal,
     onData: (chunk) => {
       const choice = chunk.choices?.[0];
       tokens++;
@@ -346,10 +369,8 @@ async function generate(current, text, maxTokens, onText) {
 /** The output budget for a piece: generous, so that only output running away is cut. */
 const maxTokensFor = (source) => Math.min(N_CTX / 2, estimateTokens(source) * 3 + 64);
 
-async function run(id, work) {
-  const current = await startJob(id);
-  let finished;
-  current.running = new Promise((resolve) => (finished = resolve));
+async function run(id, kind, work) {
+  const current = await startJob(id, kind);
   const totals = { tokens: 0, cut: 0 };
   try {
     await ensureLoaded();
@@ -363,13 +384,13 @@ async function run(id, work) {
       post({ type: "error", id, code: e.code ?? "failed", message: String(e?.message ?? e) });
     }
   } finally {
-    if (job === current) job = null;
-    finished();
+    if (jobs.get(id) === current) jobs.delete(id);
+    current.finished();
   }
 }
 
 function translate(request) {
-  return run(request.id, async (current, totals) => {
+  return run(request.id, "translate", async (current, totals) => {
     const target = resolveTarget(request.target, request.text);
     post({ type: "started", id: request.id, target });
     const { leading, chunks } = split(request.text, CHUNK_TOKENS);
@@ -390,17 +411,18 @@ function translate(request) {
 }
 
 function translateSegments(request) {
-  return run(request.id, async (current, totals) => {
+  return run(request.id, "segments", async (current, totals) => {
     const target = resolveTarget(request.target, request.segments.join("\n"));
     post({ type: "started", id: request.id, target });
     const history = new History(HISTORY_TOKENS);
     for (const [index, segment] of request.segments.entries()) {
       const text = prompt({ text: segment, target, source: request.source, style: request.style, history: history.pairs });
-      const result = await generate(current, text, maxTokensFor(segment), () => {});
+      const result = await generate(current, text, maxTokensFor(segment));
       totals.tokens += result.tokens;
       if (result.cut) totals.cut++;
       const translation = result.output.trim();
-      post({ type: "segment", id: request.id, index, text: translation });
+      // The tokens let the background tell the page's speed over its batches running together.
+      post({ type: "segment", id: request.id, index, text: translation, tokens: result.tokens });
       history.add(segment, translation);
     }
   });
@@ -414,7 +436,8 @@ function setStatus(next) {
 }
 
 function sendStatus() {
-  post({ type: "status", engine: "browser", ...status });
+  // `slots`: the page batches to send at once.
+  post({ type: "status", engine: "browser", slots: SLOTS, ...status });
 }
 
 async function sendOptions() {
@@ -473,7 +496,8 @@ port.onMessage.addListener(async (message) => {
       return;
     }
     case "cancel":
-      job?.controller.abort();
+      // One job, or without an id all of them.
+      for (const j of jobs.values()) if (message.id == null || j.id === message.id) j.controller.abort();
       return;
     case "translate":
       translate(message);

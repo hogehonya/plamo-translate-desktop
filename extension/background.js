@@ -7,7 +7,8 @@
 // - Panels connect here (port "panel"). Their translations start at once; a page translation
 //   in progress is interrupted and its unfinished paragraphs are sent again afterwards.
 // - Page translation runs in page.js (port "page"), which sends paragraphs; they go to the
-//   host in small batches while nothing else is running.
+//   host in small batches while no panel translation runs. The app's host runs one batch at a
+//   time; the in-browser engine runs several side by side (its status's `slots`).
 // - The connection closes after IDLE_MS without work, which ends the host (or closes the
 //   offscreen document) and frees the model's memory. Chrome keeps this service worker alive
 //   while the host's connection is open; the in-browser engine sends `keepalive` messages.
@@ -48,13 +49,16 @@ let nextId = 1;
 const panels = new Set();
 /**
  * Jobs sent to the host whose `done` (or `error`) has not arrived, by id:
- * { id, kind: "panel", port } or { id, kind: "page", tabId, items, cancelled }.
+ * { id, kind: "panel", port } or { id, kind: "page", tabId, items, cancelled, counted }.
  * A job superseded by a newer one stays here until the host reports it stopped.
  */
 const jobs = new Map();
-/** The newest job, which the host is running. */
-let active = null;
-/** Page translations by tab: { port, target, style, pending: [{ sid, text }] }. */
+/** The jobs the host runs, not superseded: a panel translation, or page batches. */
+const active = new Set();
+/**
+ * Page translations by tab: { port, target, style, pending: [{ sid, text }], busySince,
+ * busyTokens }. The last two count the tokens since its batches started, for its speed.
+ */
 const pages = new Map();
 
 // ---- Engines ----
@@ -180,7 +184,7 @@ function release(reason) {
     }
   }
   jobs.clear();
-  active = null;
+  active.clear();
   for (const page of pages.values()) {
     page.pending = [];
     page.port.postMessage({ type: "error", code: "released" });
@@ -199,6 +203,8 @@ function onHostMessage(connection, message) {
     case "status":
       status = { ...message, engine: connection.kind };
       broadcast(status);
+      // The first one tells how many batches the engine runs at once.
+      schedule();
       return;
     case "options":
       options = { ...message, engine: connection.kind };
@@ -215,7 +221,7 @@ function onHostMessage(connection, message) {
   const finished = message.type === "done" || message.type === "error";
   if (finished) {
     jobs.delete(job.id);
-    if (active === job) active = null;
+    active.delete(job);
   }
   if (job.kind === "panel") {
     job.port.postMessage(message);
@@ -234,20 +240,29 @@ function onBatchMessage(job, message) {
       item.done = true;
       page?.port.postMessage({ type: "segment", sid: item.sid, text: message.text });
     }
+    // The in-browser engine tells each segment's tokens; the app's host only the batch's.
+    if (message.tokens > 0 && !job.cancelled) {
+      job.counted += message.tokens;
+      countTokens(page, message.tokens);
+    }
     return;
   }
   // The batch starts once the model is loaded: the speed leaves the loading out.
-  if (message.type === "started") job.startedAt = performance.now();
+  if (message.type === "started" && page) page.busySince ??= performance.now();
   if (message.type !== "done" && message.type !== "error") return;
-  if (!page || job.cancelled) return;
+  if (!page) return;
+  if (message.type === "done" && !job.cancelled) countTokens(page, message.tokens - job.counted);
+  // The speed counts from the start of the page's batches running together.
+  if (![...jobs.values()].some((j) => j.kind === "page" && j.tabId === job.tabId)) {
+    page.busySince = null;
+    page.busyTokens = 0;
+  }
+  if (job.cancelled) return;
   if (message.type === "error") {
     page.pending = [];
     page.port.postMessage({ type: "error", code: message.code, message: message.message });
     return;
   }
-  // The batch's speed, prompts included, for the box on the page.
-  const seconds = (performance.now() - job.startedAt) / 1000;
-  if (message.tokens > 0 && seconds > 0) page.port.postMessage({ type: "speed", tokensPerSecond: message.tokens / seconds });
   const undone = job.items.filter((item) => !item.done);
   if (undone.length && !message.cancelled) {
     // Cut short otherwise; the same batch would stop again. Resume in the page tries again.
@@ -261,12 +276,20 @@ function onBatchMessage(job, message) {
   reportPage(page);
 }
 
+/** Adds generated tokens to a page's count, and tells it its speed (prompts included). */
+function countTokens(page, tokens) {
+  if (!page || !(tokens > 0) || page.busySince == null) return;
+  page.busyTokens += tokens;
+  const seconds = (performance.now() - page.busySince) / 1000;
+  if (seconds > 0) page.port.postMessage({ type: "speed", tokensPerSecond: page.busyTokens / seconds });
+}
+
 function failAll(error) {
   for (const job of jobs.values()) {
     if (job.kind === "panel") job.port.postMessage({ type: "error", id: job.id, ...error });
   }
   jobs.clear();
-  active = null;
+  active.clear();
   for (const page of pages.values()) {
     page.pending = [];
     page.port.postMessage({ type: "error", ...error });
@@ -274,11 +297,16 @@ function failAll(error) {
   reportPages();
 }
 
-/** Starts the next page batch when the host is free. */
+/** How many page batches the host runs at once: one until the in-browser engine tells. */
+const batchSlots = () => (host?.kind === "browser" && status.engine === "browser" && status.slots > 1 ? status.slots : 1);
+
+/** Starts page batches while the host has room for them and no panel translation runs. */
 function schedule() {
-  if (active) return;
-  for (const [tabId, page] of pages) {
-    if (!page.pending.length) continue;
+  if ([...active].some((job) => job.kind === "panel")) return;
+  while (active.size < batchSlots()) {
+    const entry = [...pages].find(([, page]) => page.pending.length);
+    if (!entry) return;
+    const [tabId, page] = entry;
     const items = [];
     let chars = 0;
     while (page.pending.length && items.length < BATCH_SEGMENTS && (chars < BATCH_CHARS || !items.length)) {
@@ -286,16 +314,16 @@ function schedule() {
       chars += item.text.length;
       items.push(item);
     }
-    active = { id: nextId++, kind: "page", tabId, items, cancelled: false, startedAt: performance.now() };
-    jobs.set(active.id, active);
+    const job = { id: nextId++, kind: "page", tabId, items, cancelled: false, counted: 0 };
+    jobs.set(job.id, job);
+    active.add(job);
     sendHost({
       type: "translate_segments",
-      id: active.id,
+      id: job.id,
       segments: items.map((item) => item.text),
       target: page.target,
       style: page.style || undefined,
     });
-    return;
   }
 }
 
@@ -338,14 +366,16 @@ function onPanelMessage(port, message) {
       break;
     case "translate": {
       // Starts at once: the host stops whatever runs and reports it done (see onBatchMessage).
-      active = { id: nextId++, kind: "panel", port };
-      jobs.set(active.id, active);
-      port.postMessage({ type: "accepted", id: active.id });
-      sendHost({ type: "translate", id: active.id, text: message.text, target: message.target, style: message.style });
+      const job = { id: nextId++, kind: "panel", port };
+      jobs.set(job.id, job);
+      active.clear();
+      active.add(job);
+      port.postMessage({ type: "accepted", id: job.id });
+      sendHost({ type: "translate", id: job.id, text: message.text, target: message.target, style: message.style });
       break;
     }
     case "cancel":
-      if (active?.kind === "panel" && active.port === port) sendHost({ type: "cancel" });
+      cancelPanel(port);
       break;
     case "configure":
     case "options":
@@ -409,7 +439,7 @@ function onPageMessage(port, message) {
           page.port.postMessage({ type: "stopped" });
         }
       }
-      const page = pages.get(tabId) ?? { port, pending: [] };
+      const page = pages.get(tabId) ?? { port, pending: [], busySince: null, busyTokens: 0 };
       page.port = port;
       page.target = message.target;
       page.style = message.style;
@@ -439,10 +469,18 @@ function stopPage(tabId) {
   const page = pages.get(tabId);
   if (page) page.pending = [];
   for (const job of jobs.values()) {
-    if (job.kind === "page" && job.tabId === tabId) job.cancelled = true;
+    if (job.kind !== "page" || job.tabId !== tabId) continue;
+    job.cancelled = true;
+    // The app's host stops its one job, whatever the id; the in-browser engine this one.
+    if (active.has(job)) sendHost({ type: "cancel", id: job.id });
   }
-  if (active?.kind === "page" && active.tabId === tabId) sendHost({ type: "cancel" });
   reportPages();
+}
+
+/** Stops the panel's translation if it runs. */
+function cancelPanel(port) {
+  const job = [...active].find((j) => j.kind === "panel" && j.port === port);
+  if (job) sendHost({ type: "cancel", id: job.id });
 }
 
 // ---- Wiring ----
@@ -453,7 +491,7 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener((message) => onPanelMessage(port, message));
     port.onDisconnect.addListener(() => {
       panels.delete(port);
-      if (active?.kind === "panel" && active.port === port) sendHost({ type: "cancel" });
+      cancelPanel(port);
     });
   } else if (port.name === "engine") {
     // The in-browser engine's document, opened by openEngine.
