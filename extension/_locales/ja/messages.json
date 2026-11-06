@@ -636,7 +636,7 @@
     "description": "Setting: a pulsing frame on the page over the paragraphs the engine is translating"
   },
   "pageNearby": {
-    "message": "画面の近くだけ訳す（続きはスクロールに合わせて訳す）",
+    "message": "画面の近くだけ訳す",
     "description": "Setting: page translation sends only the paragraphs within a screen of the view, and the others when scrolled to"
   },
   "parallelPages": {
@@ -646,5 +646,9 @@
   "parallelPagesHint": {
     "message": "速くなりますが、前後の段落の文脈が減るため、訳文が少し不自然になることがあります。",
     "description": "Explanation under the parallel setting"
+  },
+  "pageNearbyHint": {
+    "message": "続きはスクロールに合わせて訳します。",
+    "description": "Explanation under the near-the-view setting"
   }
 }
