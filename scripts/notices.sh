@@ -14,6 +14,8 @@ cd "$(dirname "$0")/.."
     echo
     cat licenses/llama.cpp.txt
     echo
+    cat licenses/wllama.txt
+    echo
     cat licenses/lucide.txt
     if [ "$platform" = windows ]; then
         echo
