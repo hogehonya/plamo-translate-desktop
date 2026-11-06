@@ -13,21 +13,24 @@
 import { Wllama } from "./vendor/wllama/wllama.js";
 import { History, STOP, estimateTokens, prompt, resolveTarget, split } from "./translator.js";
 
-/** The models offered: the app's catalog entries that fit WebAssembly's 4 GB of memory. */
+/**
+ * The models offered: the app's catalog entries that fit WebAssembly's 4 GB of memory, at the
+ * revision of 2026-11-06 (the files of the first revision are no longer served).
+ */
 const MODELS = [
   {
     id: "plamo-3-translate-2b-Q4_K_M",
     label: "2B · Q4_K_M",
     repo: "pfnet/plamo-3-translate-2b-GGUF",
-    revision: "f2b4599dff9b3e45c62567eac15e83186b4cb64e",
-    bytes: 1807192480,
+    revision: "232fbd7916519edecddfdae0beae7e76fe70453f",
+    bytes: 1807199392,
   },
   {
     id: "plamo-3-translate-0.8b-Q4_K_M",
     label: "0.8B · Q4_K_M",
     repo: "pfnet/plamo-3-translate-0.8b-GGUF",
-    revision: "03891e907db8a43c97d3a7c75add125cc6d1f96a",
-    bytes: 573116288,
+    revision: "dbeb0856cb0b004b484f190bb71dd65876297013",
+    bytes: 573123200,
   },
 ];
 const fileName = (model) => `${model.id}.gguf`;
@@ -66,7 +69,8 @@ let loaded = null;
 let loading = null;
 /** The running translation: { id, controller }. */
 let job = null;
-let status = { state: "no_model" };
+// "starting" until the downloaded models are checked (see the end of this file).
+let status = { state: "starting" };
 const downloads = new Map();
 
 // ---- Storage ----
@@ -167,18 +171,30 @@ function measuredDevice(hardware) {
   }
 }
 
+// Two texts: the second is timed, and must differ from the first, whose beginning llama.cpp
+// would otherwise reuse instead of reading the prompt again.
+const WARM_UP_TEXT = "The meeting has been moved to next Monday.";
 const MEASURE_TEXT =
-  "The meeting has been moved to next Monday afternoon. Please let the other members of the team know, " +
-  "and bring the revised budget with you.";
+  "Large language models have changed how software teams handle documentation. Instead of writing " +
+  "every page by hand, engineers now draft the structure, let a model fill in routine sections, and " +
+  "spend their time reviewing technical details. This shift raises new questions about accuracy, " +
+  "ownership and style, and about who checks the result before it is published.";
 
-/** Seconds for a typical piece (200 prompt and 100 generated tokens) on the loaded model. */
+/**
+ * Seconds for a typical piece (200 prompt and 100 generated tokens) on the loaded model, and the
+ * speeds measured.
+ */
 async function measure() {
-  const run = () =>
-    loaded.wllama.createCompletion({ prompt: prompt({ text: MEASURE_TEXT, target: "ja" }), max_tokens: 64, temperature: 0, stop: [STOP] });
+  const run = (text) =>
+    loaded.wllama.createCompletion({ prompt: prompt({ text, target: "ja" }), max_tokens: 64, temperature: 0, stop: [STOP] });
   // The first run includes one-time work, such as compiling GPU kernels.
-  await run();
-  const { timings } = await run();
-  return 200 / timings.prompt_per_second + 100 / timings.predicted_per_second;
+  await run(WARM_UP_TEXT);
+  const { timings } = await run(MEASURE_TEXT);
+  return {
+    seconds: 200 / timings.prompt_per_second + 100 / timings.predicted_per_second,
+    prompt: Math.round(timings.prompt_per_second),
+    generation: Math.round(timings.predicted_per_second * 10) / 10,
+  };
 }
 
 // ---- Loading ----
@@ -229,12 +245,13 @@ async function ensureLoaded() {
     }
     // Measure: the GPU, then the CPU, keeping the faster one loaded.
     setStatus({ state: "measuring", model: model.label });
+    const failed = { seconds: Infinity };
     await load(model, "gpu");
-    const gpuSeconds = await measure().catch(() => Infinity);
+    const gpuSpeed = await measure().catch(() => failed);
     await load(model, "cpu");
-    const cpuSeconds = await measure().catch(() => Infinity);
-    const faster = gpuSeconds < cpuSeconds ? "gpu" : "cpu";
-    localStorage.setItem("measured", JSON.stringify({ hardware, device: faster, gpuSeconds, cpuSeconds }));
+    const cpuSpeed = await measure().catch(() => failed);
+    const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
+    localStorage.setItem("measured", JSON.stringify({ hardware, device: faster, gpu: gpuSpeed, cpu: cpuSpeed }));
     if (faster === "gpu") await load(model, "gpu");
   })();
   try {
