@@ -34,7 +34,10 @@ const MENUS = [
 let host = null;
 /** Settles once the new connection's `configure` is sent; messages wait for it. */
 let hostReady = Promise.resolve();
-/** Whether the app's host answered, for automatic engine selection; asked again after it fails. */
+/**
+ * Whether the app's host answers (a promise), for automatic engine selection; asked again after
+ * it fails.
+ */
 let appAvailable;
 /** Resolves with the in-browser engine's port once its document connects. */
 let engineConnected = null;
@@ -49,11 +52,12 @@ let nextId = 1;
 const panels = new Set();
 /**
  * Jobs sent to the host whose `done` (or `error`) has not arrived, by id:
- * { id, kind: "panel", port } or { id, kind: "page", tabId, items, cancelled, counted }.
+ * { id, kind: "panel", port }, { id, kind: "measure", port } (the in-browser engine measuring
+ * its devices), or { id, kind: "page", tabId, items, cancelled, counted }.
  * A job superseded by a newer one stays here until the host reports it stopped.
  */
 const jobs = new Map();
-/** The jobs the host runs, not superseded: a panel translation, or page batches. */
+/** The jobs the host runs, not superseded: a panel translation or measurement, or page batches. */
 const active = new Set();
 /**
  * Page translations by tab: { port, target, style, pending: [{ sid, text }], busySince,
@@ -63,12 +67,27 @@ const pages = new Map();
 
 // ---- Engines ----
 
+/** The panel's engine setting: `auto`, `app`, or `browser`. */
+async function engineSetting() {
+  const { engine } = await chrome.storage.local.get({ engine: "auto" }).catch(() => ({ engine: "auto" }));
+  return engine;
+}
+
 /** The engine to use: the panel's choice, or on automatic the app if its host answers. */
 async function chooseEngine() {
-  const { engine } = await chrome.storage.local.get({ engine: "auto" }).catch(() => ({ engine: "auto" }));
+  const engine = await engineSetting();
   if (engine === "app" || engine === "browser") return engine;
-  appAvailable ??= await probeApp();
-  return appAvailable ? "app" : "browser";
+  appAvailable ??= probeApp();
+  return (await appAvailable) ? "app" : "browser";
+}
+
+/** Tells the panels (or `port`) which engine the automatic setting uses, when it is the setting. */
+async function reportEngine(port = null) {
+  const setting = await engineSetting();
+  const auto = setting === "auto" ? (host?.kind ?? (await chooseEngine())) : null;
+  const message = { type: "engine", setting, auto };
+  if (port) port.postMessage(message);
+  else broadcast(message);
 }
 
 /** Whether the app's host starts and answers: it is registered, and the app is where it was. */
@@ -111,6 +130,7 @@ function connectHost() {
       closeConnection(connection);
       return;
     }
+    reportEngine();
     port.onMessage.addListener((message) => onHostMessage(connection, message));
     port.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError?.message ?? "";
@@ -181,6 +201,8 @@ function release(reason) {
   for (const job of jobs.values()) {
     if (job.kind === "panel") {
       job.port.postMessage({ type: "done", id: job.id, tokens: 0, cut: 0, stopped: true, cancelled: true });
+    } else if (job.kind === "measure") {
+      job.port.postMessage({ type: "measured", error: { code: "released" } });
     }
   }
   jobs.clear();
@@ -225,6 +247,8 @@ function onHostMessage(connection, message) {
   }
   if (job.kind === "panel") {
     job.port.postMessage(message);
+  } else if (job.kind === "measure") {
+    if (finished) job.port.postMessage({ type: "measured", error: message.type === "error" ? message : null });
   } else {
     onBatchMessage(job, message);
   }
@@ -287,6 +311,7 @@ function countTokens(page, tokens) {
 function failAll(error) {
   for (const job of jobs.values()) {
     if (job.kind === "panel") job.port.postMessage({ type: "error", id: job.id, ...error });
+    else if (job.kind === "measure") job.port.postMessage({ type: "measured", error });
   }
   jobs.clear();
   active.clear();
@@ -300,9 +325,9 @@ function failAll(error) {
 /** How many page batches the host runs at once: one until the in-browser engine tells. */
 const batchSlots = () => (host?.kind === "browser" && status.engine === "browser" && status.slots > 1 ? status.slots : 1);
 
-/** Starts page batches while the host has room for them and no panel translation runs. */
+/** Starts page batches while the host has room for them and no panel translation (or measurement) runs. */
 function schedule() {
-  if ([...active].some((job) => job.kind === "panel")) return;
+  if ([...active].some((job) => job.kind !== "page")) return;
   while (active.size < batchSlots()) {
     const entry = [...pages].find(([, page]) => page.pending.length);
     if (!entry) return;
@@ -362,6 +387,7 @@ function onPanelMessage(port, message) {
       port.postMessage(status);
       if (options) port.postMessage(options);
       reportPages(port);
+      reportEngine(port);
       if (host) sendHost({ type: "options" });
       break;
     case "translate": {
@@ -396,7 +422,24 @@ function onPanelMessage(port, message) {
         appAvailable = undefined;
         release("engine");
         sendHost({ type: "options" });
+        reportEngine();
       });
+      break;
+    case "measure":
+      // The in-browser engine measures the GPU and the CPU again; page batches wait for it.
+      (async () => {
+        // While the connection starts (as after the panel's `configure`), its kind is not known yet.
+        if ((host?.kind ?? (await chooseEngine())) !== "browser") {
+          port.postMessage({ type: "measured", error: { code: "failed", message: "not the in-browser engine" } });
+          return;
+        }
+        const job = { id: nextId++, kind: "measure", port };
+        jobs.set(job.id, job);
+        active.clear();
+        active.add(job);
+        sendHost({ type: "measure", id: job.id });
+        reportPages();
+      })();
       break;
     case "release":
       release("requested");

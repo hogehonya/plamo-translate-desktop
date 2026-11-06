@@ -105,12 +105,13 @@ Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
 The extension can also translate on its own, with the model running in the browser
 ([wllama](https://github.com/ngxson/wllama): llama.cpp compiled to WebAssembly). It needs Chrome or Edge 137 or later.
 
-- **Engine** under **Settings** in the panel: **Automatic** uses the app when it is connected (step 1 above) and the browser otherwise;
-  **PLaMo Translate Desktop** and **In the browser** choose one. The extension can then be loaded without installing the app
+- **Engine** under **Settings** in the panel: **Automatic** uses the app when it is connected (step 1 above) and the browser otherwise
+  (the list shows which it uses now); **PLaMo Translate Desktop** and **In the browser** choose one. The extension can then be loaded without installing the app
   (step 2, with the `browser-extension` folder of a package).
 - In the browser, choose and download a model under **Settings**: 0.8B or 2B (Q4_K_M; the larger ones do not fit in WebAssembly's memory).
   The first download asks you to accept the PLaMo Community License. Models are stored in the browser, separately from the app's.
-- **Device**: **Automatic** measures the CPU (WebAssembly) and the GPU (WebGPU) on the first translation and keeps the faster one.
+- **Device**: **Automatic** measures the CPU (WebAssembly) and the GPU (WebGPU) on the first translation and keeps the faster one,
+  shown as, for example, **Automatic (GPU)** with the speeds measured. **Measure and choose** below it measures them again.
   With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT,
   and 18 on the CPU of a Ryzen 9 9950X: slower than the app, but usable. Reading long texts is slower on the CPU.
 - As with the app, the model is released after 5 minutes without use, or with **Release**.

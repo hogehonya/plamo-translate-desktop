@@ -262,6 +262,13 @@ impl Host {
                 bytes: entry.bytes,
             })
             .collect();
+        let auto_device = self.lock().devices.as_deref().map(|devices| {
+            devices::device_label(devices::resolve(
+                &DeviceSetting::Auto,
+                settings.backend.measured.as_ref(),
+                devices,
+            ))
+        });
         let devices = self
             .lock()
             .devices
@@ -289,6 +296,7 @@ impl Host {
                 .and_then(catalog::find_entry)
                 .map(|entry| entry.to_string()),
             app_device: device_setting_name(&settings.backend.device),
+            auto_device,
             model: self.model_choice.clone(),
             device: self.device_choice.as_ref().map(device_setting_name),
         });

@@ -506,7 +506,7 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 - Protocol (`crates/host/src/protocol.rs`): length-prefixed JSON both ways.
   - Requests: `translate { id, text, target (code or auto), source, style }`, `translate_segments { id, segments, … }`, `cancel { id }` (the id is optional), `status`, `options`,
     and `configure { model, device }` (the extension's own choices; absent fields follow the app).
-  - Responses: `status` (starting, loading, ready, no_model, error), `options` (downloaded models, devices, and the current choices),
+  - Responses: `status` (starting, loading, ready, no_model, error), `options` (downloaded models, devices, the current choices, and the device `auto` uses),
     `started`, `progress`, `text`, `segment { index, text }`, `rewind` (a UTF-16 length, as JavaScript counts),
     `done { tokens, cut, stopped, cancelled }`, and `error` with a code the extension localizes.
   - The host reads the app's settings before each request and reloads when the model or device changed.
@@ -564,6 +564,10 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     which gets the integrated GPU beside a discrete one; `engine.js` wraps `URL.createObjectURL` so that wllama's worker code starts by
     defaulting `requestAdapter` to `high-performance`. On `auto`, the first load measures both (a warm-up text, then a different one,
     since llama.cpp would reuse the same prompt) and keeps the faster, saved with the GPU's name and the core count.
+    The panel's Measure and choose measures again (`measure { id }`, a job like a panel translation: page batches wait for it), and
+    `options` carry what `auto` uses and the speeds, which the panel shows (`Automatic (GPU)`, as the app's settings do).
+  - The background tells the panels which engine the automatic setting uses (`engine { setting, auto }`), probing the app's host once
+    if nothing is connected, so the engine list shows it.
   - The status reports the device llama.cpp really uses, from its messages while loading (the WebGPU adapter, at the log level, and
     the layers offloaded, at the debug level): without an adapter in wllama's worker it computes on the CPU, and `auto` then does not
     count the GPU's measurement. On the CPU, `configure { threads }` sets wllama's `n_threads` (the panel offers powers of two up to the logical cores).

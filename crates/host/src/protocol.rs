@@ -98,6 +98,9 @@ pub enum Response {
         /// The app's selection (a label) and device setting (`auto`, `cpu`, or a name).
         app_model: Option<String>,
         app_device: String,
+        /// The device `auto` uses (`CPU` or a name), as the app measured; absent until the
+        /// devices are known.
+        auto_device: Option<String>,
         /// The extension's choices, if any (as in `configure`).
         model: Option<String>,
         device: Option<String>,

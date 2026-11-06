@@ -166,15 +166,24 @@ async function gpuDescription() {
   return info.description || [info.vendor, info.architecture].filter(Boolean).join(" ") || "WebGPU";
 }
 
-/** What `auto` measured on this machine, kept while the GPU and the cores are the same. */
-function measuredDevice(hardware) {
+/** What a measurement is kept for: the GPU and the cores. */
+const hardwareOf = (gpu) => `${gpu}; ${navigator.hardwareConcurrency} cores`;
+
+/**
+ * The last measurement while it holds for this machine: { device, gpu, cpu }, each speed
+ * { seconds, prompt, generation } (seconds null if it did not run), or null.
+ */
+function savedMeasurement(hardware) {
   try {
     const saved = JSON.parse(localStorage.getItem("measured") ?? "null");
-    return saved?.hardware === hardware ? saved.device : null;
+    return saved?.hardware === hardware ? saved : null;
   } catch {
     return null;
   }
 }
+
+/** The device `auto` uses: the faster one measured, the CPU without a GPU, or null if not measured. */
+const autoDevice = (gpu) => (gpu ? (savedMeasurement(hardwareOf(gpu))?.device ?? null) : "cpu");
 
 // Two texts: the second is timed, and must differ from the first, whose beginning llama.cpp
 // would otherwise reuse instead of reading the prompt again.
@@ -284,48 +293,95 @@ async function loadSelected() {
   let device = settings.device === "cpu" || settings.device === "gpu" ? settings.device : null;
   const gpu = device === "cpu" ? null : await gpuDescription();
   if (device === "gpu" && !gpu) device = "cpu";
-  const hardware = `${gpu}; ${navigator.hardwareConcurrency} cores`;
-  device ??= gpu ? measuredDevice(hardware) : "cpu";
+  device ??= autoDevice(gpu);
   try {
     if (device) {
       await load(model, device);
     } else {
-      // Measure: the GPU, then the CPU, keeping the faster one loaded.
-      setStatus({ state: "measuring", model: model.label });
-      const failed = { seconds: Infinity };
-      await load(model, "gpu");
-      // Without the GPU in use, this would measure the CPU.
-      const gpuSpeed = loaded.gpu ? await measure().catch(() => failed) : failed;
-      await load(model, "cpu");
-      const cpuSpeed = await measure().catch(() => failed);
-      const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
-      localStorage.setItem("measured", JSON.stringify({ hardware, device: faster, gpu: gpuSpeed, cpu: cpuSpeed }));
-      if (faster === "gpu") await load(model, "gpu");
+      await measureDevices(model, gpu);
     }
-    // `gpuUnavailable`: WebGPU was chosen (or measured) but llama.cpp could not use it.
-    setStatus({
-      state: "ready",
-      model: model.label,
-      device: deviceLabel(),
-      // The CPU's threads, which the panel shows.
-      threads: loaded.gpu ? undefined : loaded.threads,
-      gpuUnavailable: loaded.device === "gpu" && !loaded.gpu,
-    });
+    setReady(model);
   } catch (e) {
-    setStatus({ state: "error", model: model.label, message: String(e?.message ?? e) });
-    throw Object.assign(new Error(String(e?.message ?? e)), { code: "load_failed" });
+    throw loadFailed(model, e);
   }
+}
+
+/** Measures the GPU, then the CPU, with `model`, saves which is faster, and keeps that one loaded. */
+async function measureDevices(model, gpu, again = false) {
+  setStatus({ state: "measuring", model: model.label, again });
+  // Infinity, saved as null.
+  const failed = { seconds: Infinity };
+  await load(model, "gpu");
+  // Without the GPU in use, this would measure the CPU.
+  const gpuSpeed = loaded.gpu ? await measure().catch(() => failed) : failed;
+  await load(model, "cpu");
+  const cpuSpeed = await measure().catch(() => failed);
+  const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
+  localStorage.setItem("measured", JSON.stringify({ hardware: hardwareOf(gpu), device: faster, gpu: gpuSpeed, cpu: cpuSpeed }));
+  if (faster === "gpu") await load(model, "gpu");
+}
+
+function setReady(model) {
+  // `gpuUnavailable`: WebGPU was chosen (or measured) but llama.cpp could not use it.
+  setStatus({
+    state: "ready",
+    model: model.label,
+    device: deviceLabel(),
+    // The CPU's threads, which the panel shows.
+    threads: loaded.gpu ? undefined : loaded.threads,
+    gpuUnavailable: loaded.device === "gpu" && !loaded.gpu,
+  });
+}
+
+function loadFailed(model, e) {
+  setStatus({ state: "error", model: model.label, message: String(e?.message ?? e) });
+  return Object.assign(new Error(String(e?.message ?? e)), { code: "load_failed" });
+}
+
+/**
+ * Measures the GPU and the CPU again (the panel's Measure and choose), as job `id`. It ends the
+ * running translations, and the background sends no page batches until it is done.
+ */
+async function remeasure(id) {
+  const current = await startJob(id, "measure");
+  const next = loading.then(async () => {
+    const model = await selectedModel();
+    if (!model || !(await isDownloaded(model))) {
+      setStatus({ state: "no_model" });
+      throw Object.assign(new Error("no model is downloaded"), { code: "no_model" });
+    }
+    const gpu = await gpuDescription();
+    try {
+      if (gpu) await measureDevices(model, gpu, true);
+      else await load(model, "cpu");
+      setReady(model);
+    } catch (e) {
+      throw loadFailed(model, e);
+    }
+  });
+  loading = next.catch(() => {});
+  try {
+    await next;
+    post({ type: "done", id, tokens: 0, cut: 0, stopped: false, cancelled: false });
+  } catch (e) {
+    post({ type: "error", id, code: e.code ?? "failed", message: String(e?.message ?? e) });
+  } finally {
+    if (jobs.get(id) === current) jobs.delete(id);
+    current.finished();
+  }
+  sendOptions();
 }
 
 // ---- Translating ----
 
 /**
  * Starts a job, ending the ones it replaces (they report themselves cancelled): a panel
- * translation (`translate`) replaces all the running jobs; a page batch (`segments`) replaces a
- * panel translation and runs beside the other batches. The background sends at most SLOTS.
+ * translation (`translate`) or a measurement (`measure`) replaces all the running jobs; a page
+ * batch (`segments`) replaces the others and runs beside the other batches. The background sends
+ * at most SLOTS. A measurement goes on when replaced; the job after it waits for it.
  */
 async function startJob(id, kind) {
-  const previous = [...jobs.values()].filter((j) => kind === "translate" || j.kind === "translate");
+  const previous = [...jobs.values()].filter((j) => kind !== "segments" || j.kind !== "segments");
   let finished;
   const running = new Promise((resolve) => (finished = resolve));
   const current = { id, kind, controller: new AbortController(), running, finished };
@@ -459,6 +515,9 @@ async function sendOptions() {
     // The thread counts to choose from go up to the logical cores.
     cores: navigator.hardwareConcurrency,
     threads: settings.threads || null,
+    // What `auto` uses (null until measured), and the last measurement.
+    auto: autoDevice(gpu),
+    measured: gpu ? savedMeasurement(hardwareOf(gpu)) : null,
   });
 }
 
@@ -504,6 +563,9 @@ port.onMessage.addListener(async (message) => {
       return;
     case "translate_segments":
       translateSegments(message);
+      return;
+    case "measure":
+      remeasure(message.id);
       return;
   }
 });

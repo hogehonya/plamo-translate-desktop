@@ -544,5 +544,83 @@
         "content": "$1"
       }
     }
+  },
+  "engineAutoApp": {
+    "message": "自動（いまはアプリ）",
+    "description": "The engine Automatic uses now: the app's"
+  },
+  "engineAutoBrowser": {
+    "message": "自動（いまはブラウザ内）",
+    "description": "The engine Automatic uses now: the in-browser one"
+  },
+  "deviceAutoIs": {
+    "message": "自動（$WHAT$）",
+    "description": "The device Automatic uses, such as GPU or Vulkan0",
+    "placeholders": {
+      "what": {
+        "content": "$1",
+        "example": "GPU"
+      }
+    }
+  },
+  "deviceAutoApp": {
+    "message": "自動: $WHAT$",
+    "description": "Inside 'Same as the app (…)': the device the app's Automatic uses",
+    "placeholders": {
+      "what": {
+        "content": "$1",
+        "example": "Vulkan0"
+      }
+    }
+  },
+  "measure": {
+    "message": "速さを測って選ぶ",
+    "description": "Button: measure the GPU and the CPU again (as in the app)"
+  },
+  "measureTitle": {
+    "message": "今のモデルで GPU と CPU に短い文章を訳させ、速いほうを「自動」で使うようにします。数秒から 1 分ほどかかり、その間ページの翻訳は待ちます。",
+    "description": "Tooltip of the measure button"
+  },
+  "measuring": {
+    "message": "測定中…",
+    "description": "The measure button while measuring"
+  },
+  "measured": {
+    "message": "測定結果: $RESULTS$",
+    "description": "The last measurement",
+    "placeholders": {
+      "results": {
+        "content": "$1",
+        "example": "GPU 61 tokens/s · CPU 18 tokens/s"
+      }
+    }
+  },
+  "measuredSpeed": {
+    "message": "$NAME$ 毎秒 $SPEED$ トークン",
+    "description": "One device's generation speed in the measurement",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "GPU"
+      },
+      "speed": {
+        "content": "$2",
+        "example": "61"
+      }
+    }
+  },
+  "measuredFailed": {
+    "message": "$NAME$ は動作せず",
+    "description": "A device that failed in the measurement",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "GPU"
+      }
+    }
+  },
+  "statusMeasuringAgain": {
+    "message": "GPU と CPU の速さを測っています…",
+    "description": "Status while measuring again from the button"
   }
 }

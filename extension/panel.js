@@ -22,6 +22,10 @@ const langName = (code) => t(`lang_${code.replaceAll("-", "_").replace("(easy)",
 let port = null;
 /** The engine in use, from its status and options: `app` or `browser`. */
 let engine = "app";
+/** The engine the automatic setting uses (`app` or `browser`), or null when another is set. */
+let autoEngine = null;
+/** Whether the in-browser engine is measuring its devices for the button. */
+let measuring = false;
 // The model and device chosen here for each engine, by storage key ("" is the default: the
 // app's choice, or the first model downloaded); the background sends them whenever it starts
 // the engine.
@@ -88,6 +92,15 @@ function updateThreadsVisibility() {
   $("threadsRow").hidden = !(engine === "browser" && $("device").value === "cpu");
 }
 
+$("measure").addEventListener("click", () => {
+  // Automatic then uses the faster device.
+  $("device").value = "";
+  $("device").dispatchEvent(new Event("change"));
+  measuring = true;
+  renderMeasure();
+  send({ type: "measure" });
+});
+
 $("resetSettings").addEventListener("click", async () => {
   if (!confirm(t("resetSettingsConfirm"))) return;
   await chrome.storage.local.clear();
@@ -128,7 +141,7 @@ function applyLanguage() {
   fill($("target"), TARGETS, langName);
   fill($("style"), STYLES, (style) => t(`style_${style || "default"}`));
   fill($("pageMode"), PAGE_MODES, (mode) => t(`pageMode_${mode}`));
-  fill($("engine"), ENGINES, (name) => t(`engine${name[0].toUpperCase()}${name.slice(1)}`));
+  renderEngineSelect();
   const browser = UI_LANGUAGES[chrome.i18n.getMessage("locale")] ?? "";
   fill($("uiLanguage"), ["auto", ...Object.keys(UI_LANGUAGES)], (lang) =>
     lang === "auto" ? t("uiLanguageAuto", browser) : UI_LANGUAGES[lang],
@@ -288,6 +301,15 @@ function onMessage(message) {
     case "options":
       renderOptions(message);
       return;
+    case "engine":
+      autoEngine = message.auto;
+      renderEngineSelect();
+      return;
+    case "measured":
+      measuring = false;
+      renderMeasure();
+      if (message.error && message.error.code !== "released") showNotice(() => errorText(message.error));
+      return;
     case "download":
       downloads[message.model] = message;
       renderBrowserModels();
@@ -415,16 +437,20 @@ function renderOptions(options) {
   }
   $("browserModels").hidden = true;
   $("threadsRow").hidden = true;
+  renderMeasure();
   const model = $("model");
   model.replaceChildren(new Option(t("followApp", options.app_model ?? t("none")), ""));
   for (const m of options.models) model.add(new Option(`${m.label} (${gb(m.bytes)})`, m.id));
   model.value = options.model ?? "";
 
-  const deviceName = (setting) => (setting === "auto" ? t("deviceAuto") : setting === "cpu" ? "CPU" : setting);
+  // Automatic as the app measured, such as `Automatic (Vulkan0)`.
+  const auto = options.auto_device;
+  const deviceName = (setting) =>
+    setting === "auto" ? (auto ? t("deviceAutoApp", auto) : t("deviceAuto")) : setting === "cpu" ? "CPU" : setting;
   const device = $("device");
   device.replaceChildren(
     new Option(t("followApp", deviceName(options.app_device)), ""),
-    new Option(t("deviceAuto"), "auto"),
+    new Option(auto ? t("deviceAutoIs", auto) : t("deviceAuto"), "auto"),
     new Option("CPU", "cpu"),
   );
   for (const d of options.devices) device.add(new Option(`${d.name} — ${d.description}`, d.name));
@@ -441,7 +467,8 @@ function renderBrowserOptions(options) {
   }
   model.value = options.model ?? "";
   const device = $("device");
-  device.replaceChildren(new Option(t("deviceAutoMeasured"), ""));
+  // Automatic: the faster device measured, or measured on first use.
+  device.replaceChildren(new Option(options.auto ? t("deviceAutoIs", options.auto.toUpperCase()) : t("deviceAutoMeasured"), ""));
   for (const d of options.devices) device.add(new Option(`${d.name.toUpperCase()} — ${d.description}`, d.name));
   device.value = options.device && options.device !== "auto" ? options.device : "";
   // Thread counts for the CPU: powers of two up to the logical cores, and the cores.
@@ -452,7 +479,31 @@ function renderBrowserOptions(options) {
   threads.replaceChildren(new Option(t("threadsAuto"), ""), ...counts.map((n) => new Option(String(n), String(n))));
   threads.value = options.threads ? String(options.threads) : "";
   updateThreadsVisibility();
+  renderMeasure();
   renderBrowserModels();
+}
+
+/** The in-browser engine's Measure and choose, with the last measurement, when it has a GPU. */
+function renderMeasure() {
+  const options = shownOptions;
+  const shown = engine === "browser" && !!options?.devices?.some((d) => d.name === "gpu");
+  $("measureRow").hidden = !shown;
+  if (!shown) return;
+  const button = $("measure");
+  button.disabled = measuring;
+  button.textContent = t(measuring ? "measuring" : "measure");
+  const m = options.measured;
+  const speed = (name, s) => (s?.seconds > 0 ? t("measuredSpeed", name, String(Math.round(s.generation))) : t("measuredFailed", name));
+  $("measured").textContent = m && !measuring ? t("measured", `${speed("GPU", m.gpu)} · ${speed("CPU", m.cpu)}`) : "";
+}
+
+/** The engines, with the one the automatic setting uses when it is known. */
+function renderEngineSelect() {
+  fill($("engine"), ENGINES, (name) =>
+    name === "auto" && autoEngine
+      ? t(autoEngine === "browser" ? "engineAutoBrowser" : "engineAutoApp")
+      : t(`engine${name[0].toUpperCase()}${name.slice(1)}`),
+  );
 }
 
 /** The in-browser engine's models with their downloads, and the license before the first one. */
@@ -523,7 +574,7 @@ function renderStatus(status) {
       setStatus(t("statusLoading", model));
       break;
     case "measuring":
-      setStatus(t("statusMeasuring"));
+      setStatus(t(status.again ? "statusMeasuringAgain" : "statusMeasuring"));
       break;
     case "no_model":
       setStatus(t(engine === "browser" ? "statusNoModelBrowser" : "statusNoModel"), true);
