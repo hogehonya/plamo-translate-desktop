@@ -50,6 +50,16 @@ let nextId = 1;
 
 /** Open panel ports. */
 const panels = new Set();
+
+/**
+ * Posts to a panel's or a page's port. One closed meanwhile throws, which would cut short the
+ * bookkeeping around the post; it is gone, so the message is dropped.
+ */
+function post(port, message) {
+  try {
+    port?.postMessage(message);
+  } catch {}
+}
 /**
  * Jobs sent to the host whose `done` (or `error`) has not arrived, by id:
  * { id, kind: "panel", port }, { id, kind: "measure", port } (the in-browser engine measuring
@@ -86,7 +96,7 @@ async function reportEngine(port = null) {
   const setting = await engineSetting();
   const auto = setting === "auto" ? (host?.kind ?? (await chooseEngine())) : null;
   const message = { type: "engine", setting, auto };
-  if (port) port.postMessage(message);
+  if (port) post(port, message);
   else broadcast(message);
 }
 
@@ -138,7 +148,7 @@ function connectHost() {
       if (host !== connection) return;
       host = null;
       clearTimeout(idleTimer);
-      downloads.clear();
+      endDownloads(error || "disconnected");
       status = { type: "status", state: "disconnected", engine: kind, message: error };
       broadcast(status);
       failAll({ code: "disconnected", message: error });
@@ -196,21 +206,24 @@ function release(reason) {
   closeConnection(host);
   host = null;
   appAvailable = undefined;
-  downloads.clear();
+  endDownloads(reason);
   clearTimeout(idleTimer);
   // Closing our end fires no onDisconnect; end the jobs here.
-  for (const job of jobs.values()) {
-    if (job.kind === "panel") {
-      job.port.postMessage({ type: "done", id: job.id, tokens: 0, cut: 0, stopped: true, cancelled: true });
-    } else if (job.kind === "measure") {
-      job.port.postMessage({ type: "measured", error: { code: "released" } });
-    }
-  }
+  const ended = [...jobs.values()];
   jobs.clear();
   active.clear();
+  for (const job of ended) {
+    if (job.kind === "panel") {
+      post(job.port, { type: "done", id: job.id, tokens: 0, cut: 0, stopped: true, cancelled: true });
+    } else if (job.kind === "measure") {
+      post(job.port, { type: "measured", error: { code: "released" } });
+    }
+  }
   for (const page of pages.values()) {
     page.pending = [];
-    page.port.postMessage({ type: "error", code: "released" });
+    page.busySince = null;
+    page.busyTokens = 0;
+    post(page.port, { type: "error", code: "released" });
   }
   status = { type: "status", state: "released", reason };
   broadcast(status);
@@ -247,9 +260,9 @@ function onHostMessage(connection, message) {
     active.delete(job);
   }
   if (job.kind === "panel") {
-    job.port.postMessage(message);
+    post(job.port, message);
   } else if (job.kind === "measure") {
-    if (finished) job.port.postMessage({ type: "measured", error: message.type === "error" ? message : null });
+    if (finished) post(job.port, { type: "measured", error: message.type === "error" ? message : null });
   } else {
     onBatchMessage(job, message);
   }
@@ -261,9 +274,11 @@ function onBatchMessage(job, message) {
   const page = pages.get(job.tabId);
   if (message.type === "segment") {
     const item = job.items[message.index];
+    // A stopped batch's: its page may be another one by now, in the same tab.
+    if (job.cancelled) return;
     if (item) {
       item.done = true;
-      page?.port.postMessage({ type: "segment", sid: item.sid, text: message.text });
+      post(page?.port, { type: "segment", sid: item.sid, text: message.text });
     }
     // The in-browser engine tells each segment's tokens; the app's host only the batch's.
     if (message.tokens > 0 && !job.cancelled) {
@@ -283,16 +298,17 @@ function onBatchMessage(job, message) {
     page.busyTokens = 0;
   }
   if (job.cancelled) return;
+  // A failed batch stops the page's other batches too, which would otherwise end it as done.
   if (message.type === "error") {
-    page.pending = [];
-    page.port.postMessage({ type: "error", code: message.code, message: message.message });
+    stopPage(job.tabId);
+    post(page.port, { type: "error", code: message.code, message: message.message });
     return;
   }
   const undone = job.items.filter((item) => !item.done);
   if (undone.length && !message.cancelled) {
     // Cut short otherwise; the same batch would stop again. Resume in the page tries again.
-    page.pending = [];
-    page.port.postMessage({ type: "error", code: "failed", message: "the translation stopped early" });
+    stopPage(job.tabId);
+    post(page.port, { type: "error", code: "failed", message: "the translation stopped early" });
     return;
   }
   // Paragraphs not translated because the batch was cancelled (a panel translation
@@ -306,21 +322,30 @@ function countTokens(page, tokens) {
   if (!page || !(tokens > 0) || page.busySince == null) return;
   page.busyTokens += tokens;
   const seconds = (performance.now() - page.busySince) / 1000;
-  if (seconds > 0) page.port.postMessage({ type: "speed", tokensPerSecond: page.busyTokens / seconds });
+  if (seconds > 0) post(page.port, { type: "speed", tokensPerSecond: page.busyTokens / seconds });
 }
 
 function failAll(error) {
-  for (const job of jobs.values()) {
-    if (job.kind === "panel") job.port.postMessage({ type: "error", id: job.id, ...error });
-    else if (job.kind === "measure") job.port.postMessage({ type: "measured", error });
-  }
+  const ended = [...jobs.values()];
   jobs.clear();
   active.clear();
+  for (const job of ended) {
+    if (job.kind === "panel") post(job.port, { type: "error", id: job.id, ...error });
+    else if (job.kind === "measure") post(job.port, { type: "measured", error });
+  }
   for (const page of pages.values()) {
     page.pending = [];
-    page.port.postMessage({ type: "error", ...error });
+    page.busySince = null;
+    page.busyTokens = 0;
+    post(page.port, { type: "error", ...error });
   }
   reportPages();
+}
+
+/** Ends the in-browser engine's downloads in the panels, when its document goes. */
+function endDownloads(message) {
+  for (const model of downloads) broadcast({ type: "download", model, state: "error", message });
+  downloads.clear();
 }
 
 /** How many page batches the host runs at once: one until the in-browser engine tells. */
@@ -356,11 +381,11 @@ function schedule() {
 /** Tells a page when all its paragraphs are translated. */
 function reportPage(page) {
   const busy = [...jobs.values()].some((job) => job.kind === "page" && pages.get(job.tabId) === page);
-  if (!busy && !page.pending.length) page.port.postMessage({ type: "idle" });
+  if (!busy && !page.pending.length) post(page.port, { type: "idle" });
 }
 
 function broadcast(message) {
-  for (const port of panels) port.postMessage(message);
+  for (const port of panels) post(port, message);
 }
 
 /** The tabs whose page translation runs: paragraphs waiting, or a batch at the engine. */
@@ -375,7 +400,7 @@ let reportedPages = "";
 function reportPages(port = null) {
   const running = runningPages();
   const key = running.join(",");
-  if (port) port.postMessage({ type: "pages", running });
+  if (port) post(port, { type: "pages", running });
   else if (key !== reportedPages) broadcast({ type: "pages", running });
   reportedPages = key;
 }
@@ -385,8 +410,8 @@ function reportPages(port = null) {
 function onPanelMessage(port, message) {
   switch (message.type) {
     case "hello":
-      port.postMessage(status);
-      if (options) port.postMessage(options);
+      post(port, status);
+      if (options) post(port, options);
       reportPages(port);
       reportEngine(port);
       if (host) sendHost({ type: "options" });
@@ -397,7 +422,7 @@ function onPanelMessage(port, message) {
       jobs.set(job.id, job);
       active.clear();
       active.add(job);
-      port.postMessage({ type: "accepted", id: job.id });
+      post(port, { type: "accepted", id: job.id });
       sendHost({ type: "translate", id: job.id, text: message.text, target: message.target, style: message.style });
       break;
     }
@@ -431,7 +456,7 @@ function onPanelMessage(port, message) {
       (async () => {
         // While the connection starts (as after the panel's `configure`), its kind is not known yet.
         if ((host?.kind ?? (await chooseEngine())) !== "browser") {
-          port.postMessage({ type: "measured", error: { code: "failed", message: "not the in-browser engine" } });
+          post(port, { type: "measured", error: { code: "failed", message: "not the in-browser engine" } });
           return;
         }
         const job = { id: nextId++, kind: "measure", port };
@@ -448,13 +473,13 @@ function onPanelMessage(port, message) {
     case "stop_page": {
       const page = pages.get(message.tabId);
       stopPage(message.tabId);
-      page?.port.postMessage({ type: "stopped", reason: "panel" });
+      post(page?.port, { type: "stopped", reason: "panel" });
       break;
     }
     case "translate_page":
       translatePage(message.tabId).then(
-        () => port.postMessage({ type: "page_started" }),
-        (e) => port.postMessage({ type: "page_failed", message: String(e?.message ?? e) }),
+        () => post(port, { type: "page_started" }),
+        (e) => post(port, { type: "page_failed", message: String(e?.message ?? e) }),
       );
       break;
   }
@@ -480,7 +505,7 @@ function onPageMessage(port, message) {
           const running = page.pending.length || [...jobs.values()].some((j) => j.kind === "page" && j.tabId === other);
           if (!running) continue;
           stopPage(other);
-          page.port.postMessage({ type: "stopped" });
+          post(page.port, { type: "stopped" });
         }
       }
       const page = pages.get(tabId) ?? { port, pending: [], busySince: null, busyTokens: 0 };
@@ -529,15 +554,23 @@ function cancelPanel(port) {
 
 // ---- Wiring ----
 
+/** Whether `sender` is one of this extension's pages (the panel), not a content script in a page. */
+const fromExtensionPage = (sender) => !!sender?.url?.startsWith(chrome.runtime.getURL(""));
+
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === "panel") {
+  // Each port only from where it belongs: page.js runs in web pages' processes, whose ports
+  // must not act as the panel or the engine.
+  const sender = port.sender;
+  if (port.name === "panel" && fromExtensionPage(sender)) {
     panels.add(port);
     port.onMessage.addListener((message) => onPanelMessage(port, message));
     port.onDisconnect.addListener(() => {
       panels.delete(port);
       cancelPanel(port);
+      // Its jobs end at the host; what they still send goes nowhere.
+      for (const job of jobs.values()) if (job.port === port) job.port = null;
     });
-  } else if (port.name === "engine") {
+  } else if (port.name === "engine" && sender?.url === chrome.runtime.getURL("engine.html") && !sender.tab) {
     // The in-browser engine's document, opened by openEngine.
     if (engineConnected) {
       engineConnected(port);
@@ -545,7 +578,7 @@ chrome.runtime.onConnect.addListener((port) => {
     } else {
       port.disconnect();
     }
-  } else if (port.name === "page") {
+  } else if (port.name === "page" && sender?.tab && sender.frameId === 0) {
     port.onMessage.addListener((message) => onPageMessage(port, message));
     port.onDisconnect.addListener(() => {
       const tabId = port.sender?.tab?.id;
@@ -555,6 +588,8 @@ chrome.runtime.onConnect.addListener((port) => {
       pages.delete(tabId);
       reportPages();
     });
+  } else {
+    port.disconnect();
   }
 });
 

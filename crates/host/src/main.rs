@@ -226,7 +226,11 @@ impl Host {
             } => self.translate(id, Input::Segments(segments), target, source, style),
             Request::Cancel => self.worker.cancel(),
             Request::Status => {
-                self.refresh_model();
+                // Nothing loads for it before the first request that uses a model: the
+                // extension asks for the status to tell whether the host starts at all.
+                if self.loaded.is_some() {
+                    self.refresh_model();
+                }
                 self.send_status();
             }
             Request::Options => {

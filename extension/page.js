@@ -225,6 +225,8 @@
           break;
         }
         case "idle":
+          // After a stop or a failure, the box keeps saying so.
+          if (stopped) break;
           pending.clear();
           render();
           break;
