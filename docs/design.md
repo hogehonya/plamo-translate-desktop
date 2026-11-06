@@ -1,6 +1,6 @@
 # PLaMo Translate Desktop — Design
 
-Status: describes the code as of v0.3.0 (released 2026-11-06). Update it together with the code.
+Status: describes the code after v0.3.0 (released 2026-11-06), towards v0.4.0. Update it together with the code.
 
 ## 1. Goal
 
@@ -242,6 +242,9 @@ The implementation is `engine::llama::Session` (one llama.cpp context of a loade
   - At start-up it searches Hugging Face for `pfnet/<family>-<size>-GGUF` repositories of supported families (today `plamo-3-translate`).
   - It pins each repository to its current commit and reads each `<family>-<size>-<quant>.gguf` with its size and SHA-256 from the Git LFS metadata.
   - New sizes or quantizations are added, and newer revisions of known files replace the old ones.
+  - On 2026-11-06 PFN replaced every file with one that differs only in its chat template (which the app does not use), and the first
+    revision's files are no longer served. The built-in list has the new revisions; `SUPERSEDED` lists the first revision's files,
+    so that one already downloaded still counts (by its size) and an entry for it from an older cached catalog is ignored.
   - The result is cached in `catalog.json` next to the models, so offline starts know it. "Check again" in the dialog repeats the search.
   - A new model generation with a different prompt format still needs an app update, so unknown families are ignored.
 - Quality data (`engine::models::QUALITY`) holds the scores PFN publishes for every file and for the BF16 reference:
@@ -534,7 +537,33 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
   - The host loads its own copy of the model, so with the app open the model is in memory twice. Relaying to a running app would avoid that.
   - Browsers installed as Snap or Flatpak packages on Linux cannot start programs outside their sandbox.
   - Firefox would need its own manifest format (`allowed_extensions`) and an extension build for it.
-- Translating without the desktop app (WASM llama.cpp or WebGPU in the extension) is possible later; it would be much slower and limited to the small models.
+- In-browser engine (`engine.html`/`engine.js`, from v0.4.0): the extension translates without the app.
+  - It runs [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to WebAssembly with Emscripten, with WebGPU) in an offscreen document,
+    which the background opens (`chrome.offscreen`, reason `WORKERS`) and closes on release or after 5 minutes without work.
+    It speaks the host's protocol over a port named `engine`, so the background shares it as it shares the host.
+    The offscreen document sends `keepalive` every 20 seconds: Chrome keeps the service worker alive for a native port, not for a port to a page.
+  - Engine selection (`engine` in the extension's storage): `app`, `browser`, or `auto`, which asks the host for its status first
+    and uses the browser if the host does not start (not registered, or the app moved). Switching goes through the background (`set_engine`),
+    which releases the current engine. Each engine keeps its own model and device choices (`choices`, `browserChoices`).
+  - wllama is vendored in `extension/vendor/wllama`, built from source by `.github/workflows/wllama.yml` (`scripts/vendor-wllama.sh`):
+    its npm releases (3.8.1) bundle a llama.cpp that predates the PLaMo 3 tokenizer (`plamo3`, which adds pre-segmentation to `plamo2`).
+    Once a release bundles a newer one, it can be vendored instead. The build uses Memory64 and JSPI, hence Chrome 137 or later.
+  - Pages are cross-origin isolated (manifest `cross_origin_embedder_policy`/`cross_origin_opener_policy`) for WebAssembly threads,
+    and the CSP allows `'wasm-unsafe-eval'`.
+  - Models: the 0.8B and 2B Q4_K_M files of the app's catalog (WebAssembly's memory is limited to 4 GB), downloaded from Hugging Face
+    into OPFS (resumed with a Range request, checked by size) after the panel's PLaMo Community License notice.
+  - Prompts and long texts (`translator.js`, tested by `tests/extension/translator.test.mjs`): a port of `pfml`'s prompt format and of
+    the chunks with history, with token counts estimated from characters, smaller chunks (512) and history (768 tokens) because
+    WebAssembly reads prompts several times slower, and history that drops pairs several at a time so that consecutive prompts share
+    their beginning (llama.cpp reuses it). Output that runs away is cut by a token limit instead of the app's retries.
+    wllama tokenizes the prompt as one string, special tokens included, so `<|` in the text gets a zero-width space.
+  - Devices: `cpu` (WebAssembly threads) and `gpu` (WebGPU). llama.cpp's WebGPU backend requests an adapter without a power preference,
+    which gets the integrated GPU beside a discrete one; `engine.js` wraps `URL.createObjectURL` so that wllama's worker code starts by
+    defaulting `requestAdapter` to `high-performance`. On `auto`, the first load measures both (a warm-up text, then a different one,
+    since llama.cpp would reuse the same prompt) and keeps the faster, saved with the GPU's name and the core count.
+  - Measured with 2B Q4_K_M: Radeon 8060S 48 tok/s, Radeon RX 9070 XT 67 (native Vulkan 246), CPU of a Ryzen 9 9950X 18 (native 20);
+    prompts on the CPU at about 33 tok/s (native 250). Chrome uses the GPU Windows assigns to it: on a PC whose display runs on the
+    integrated GPU, the graphics settings must give Chrome the discrete one.
 
 ## 13. Status and later work
 
@@ -542,6 +571,7 @@ Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2),
 translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
 Then v0.2.0 (2026-11-06): the browser extension (§12); v0.2.1: clearer failures of page translation from the panel.
 v0.3.0: Intel NPUs through OpenVINO, and automatic device selection that measures the devices (§8).
+Towards v0.4.0: the extension's in-browser engine (§12).
 
 Possible later work:
 
