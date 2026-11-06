@@ -37,6 +37,13 @@ fn main() {
     unsafe { appdata::devices::configure_openvino() };
     let custom_model = custom_model();
     applog::init(&settings::log_path());
+    // The release build has no console on Windows: a panic is recorded in the log, then handled
+    // as before (the message on stderr, and the thread unwinding).
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        app_log!("panic: {info}");
+        default_hook(info);
+    }));
     app_log!(
         "starting {} {}; models in {}",
         env!("CARGO_PKG_NAME"),

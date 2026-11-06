@@ -38,9 +38,8 @@ pub struct DiscoveredEntry {
 }
 
 impl DiscoveredEntry {
-    /// Converts to a catalog entry. The strings are leaked, which is fine for the handful of
-    /// entries an app run registers.
-    /// Whether the fields are what discovery derives from Hugging Face's metadata.
+    /// Whether the fields are what discovery derives from Hugging Face's metadata. The digest
+    /// becomes part of a file name (the partial download), so it must be hex.
     fn is_valid(&self) -> bool {
         parse_repo(&self.repo)
             .is_some_and(|(family, size)| family == self.family && size == self.size)
@@ -50,6 +49,8 @@ impl DiscoveredEntry {
             && is_lower_hex(&self.revision, 40)
     }
 
+    /// Converts to a catalog entry. The strings are leaked, which is fine for the handful of
+    /// entries an app run registers.
     pub fn into_entry(self) -> CatalogEntry {
         fn leak(s: String) -> &'static str {
             Box::leak(s.into_boxed_str())
@@ -129,6 +130,8 @@ pub fn discover() -> Result<Vec<DiscoveredEntry>, DiscoveryError> {
             });
         }
     }
+    // As for the cache: only what has the expected shape is registered.
+    found.retain(DiscoveredEntry::is_valid);
     Ok(found)
 }
 

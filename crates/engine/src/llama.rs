@@ -415,9 +415,18 @@ impl TranslationBackend for Session<'_> {
         let tag = self.model.specials.get(SpecialToken::Tag);
         let mut sampler = if generation.penalize_repetition {
             // llama.cpp's recommended DRY settings. The sampler only sees generated tokens, so
-            // it penalizes the output repeating itself, not copying names from the source.
+            // it penalizes the output repeating itself, not copying names from the source. The
+            // window is the whole context: llama.cpp turns -1 into 0, which disables DRY.
+            let window = i32::try_from(self.n_ctx()).unwrap_or(i32::MAX);
             LlamaSampler::chain_simple([
-                LlamaSampler::dry(&self.model.model, 0.8, 1.75, 2, -1, ["\n", ":", "\"", "*"]),
+                LlamaSampler::dry(
+                    &self.model.model,
+                    0.8,
+                    1.75,
+                    2,
+                    window,
+                    ["\n", ":", "\"", "*"],
+                ),
                 LlamaSampler::greedy(),
             ])
         } else {

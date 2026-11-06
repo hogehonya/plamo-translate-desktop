@@ -345,9 +345,46 @@ impl ModelStore {
         }
     }
 
-    /// Deletes the model and any partial download.
+    /// Partial downloads of `entry`'s file for other revisions (another digest in the name):
+    /// they can never be resumed, and the files of older revisions are no longer served.
+    pub fn stale_partials(&self, entry: &CatalogEntry) -> Vec<PathBuf> {
+        let current = self.partial_path(entry);
+        let prefix = format!("{}.", entry.file_name);
+        let Ok(dir) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        dir.flatten()
+            .map(|e| e.path())
+            .filter(|path| *path != current)
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(|name| name.strip_prefix(&prefix)?.strip_suffix(".part"))
+                    .is_some_and(|digest| {
+                        digest.len() == 12 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+            })
+            .collect()
+    }
+
+    /// Removes the stale partial downloads of `entry` (see [`Self::stale_partials`]), returning
+    /// the bytes freed.
+    pub fn remove_stale_partials(&self, entry: &CatalogEntry) -> u64 {
+        self.stale_partials(entry)
+            .into_iter()
+            .filter_map(|path| {
+                let len = std::fs::metadata(&path).ok()?.len();
+                std::fs::remove_file(&path).ok().map(|()| len)
+            })
+            .sum()
+    }
+
+    /// Deletes the model and any partial download, of this revision or an older one.
     pub fn delete(&self, entry: &CatalogEntry) -> io::Result<()> {
-        for path in [self.path(entry), self.partial_path(entry)] {
+        for path in [self.path(entry), self.partial_path(entry)]
+            .into_iter()
+            .chain(self.stale_partials(entry))
+        {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -467,6 +504,33 @@ mod tests {
         assert_eq!(store.state(e), LocalState::Partial(3));
         store.delete(e).unwrap();
         assert_eq!(store.state(e), LocalState::Missing);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn stale_partials_are_removed() {
+        let dir = std::env::temp_dir().join(format!("plamo-stale-parts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = ModelStore::new(&dir);
+        let e = &BUILTIN[0];
+        // A partial download of an older revision, the current one, and other files.
+        let old = dir.join(format!("{}.0123456789ab.part", e.file_name));
+        std::fs::write(&old, b"old").unwrap();
+        std::fs::write(store.partial_path(e), b"current").unwrap();
+        std::fs::write(dir.join(format!("{}.notes.part", e.file_name)), b"x").unwrap();
+        std::fs::write(
+            dir.join(format!("{}.0123456789ab.part", BUILTIN[1].file_name)),
+            b"y",
+        )
+        .unwrap();
+        assert_eq!(store.stale_partials(e), vec![old.clone()]);
+        assert_eq!(store.remove_stale_partials(e), 3);
+        assert!(!old.exists());
+        assert_eq!(store.state(e), LocalState::Partial(7));
+        // Deleting removes older revisions' parts too.
+        std::fs::write(&old, b"old").unwrap();
+        store.delete(e).unwrap();
+        assert!(!old.exists() && !store.partial_path(e).exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

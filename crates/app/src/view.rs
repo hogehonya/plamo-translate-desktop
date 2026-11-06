@@ -406,6 +406,9 @@ pub struct TranslatorView {
 
     /// Set by the paste hook so the following change translates without debouncing.
     paste_pending: bool,
+    /// A translation was asked for while the model was loading: it runs once the model is
+    /// ready, also with Auto off (Auto on translates then anyway).
+    translate_on_load: bool,
     /// Loads sent to the worker whose result has not arrived. Each load ends in exactly one
     /// `Loaded` or `LoadFailed`; only the last one's events describe the model in use.
     pending_loads: usize,
@@ -688,6 +691,7 @@ impl TranslatorView {
             job_started: None,
             current_chunk: None,
             paste_pending: false,
+            translate_on_load: false,
             pending_loads: 0,
             runtime_error: None,
             measuring: None,
@@ -823,6 +827,7 @@ impl TranslatorView {
         self.worker.unload();
         self.active_model = None;
         self.model_ready = false;
+        self.translate_on_load = false;
         self.current_job = None;
         self.shown = None;
         self.loaded_on = None;
@@ -1259,6 +1264,7 @@ impl TranslatorView {
     fn translate_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.debounce = Task::ready(());
         if !self.model_ready {
+            self.translate_on_load = self.active_model.is_some();
             return;
         }
         let text = self.source_text(cx);
@@ -1462,16 +1468,21 @@ impl TranslatorView {
                     self.start_load(cx);
                 }
             }
-            // Progress of a load that a newer one already replaces says nothing.
-            Event::LoadProgress(p) if self.pending_loads <= 1 => self.status = Status::Loading(p),
+            // Progress of a load that a newer one already replaces, or of one unloaded since,
+            // says nothing.
+            Event::LoadProgress(p) if self.pending_loads <= 1 && self.active_model.is_some() => {
+                self.status = Status::Loading(p)
+            }
             Event::LoadProgress(_) => return,
             Event::Unloaded => {
                 crate::app_log!("model released by the worker");
                 if let Some(entry) = self.pending_delete.take() {
-                    self.models.update(cx, |models, cx| {
+                    let deleted = self.models.update(cx, |models, cx| {
                         models.delete(entry, "the active model, after unloading", cx)
                     });
-                    if self.settings.model.as_deref() == Some(entry.id()) {
+                    // A file that could not be deleted (the browser host may still hold it on
+                    // Windows) stays the selection; its row shows the error.
+                    if deleted && self.settings.model.as_deref() == Some(entry.id()) {
                         self.settings.model = None;
                         self.settings.save();
                     }
@@ -1540,11 +1551,18 @@ impl TranslatorView {
                 }
                 self.model_ready = true;
                 self.status = Status::Ready;
-                self.translate_now(window, cx);
+                // With Auto off, only a translation asked for while loading runs now.
+                if std::mem::take(&mut self.translate_on_load) || self.auto_translate {
+                    self.translate_now(window, cx);
+                }
             }
             Event::LoadFailed(e) => {
                 self.pending_loads = 0;
-                self.status = Status::Error(e);
+                self.translate_on_load = false;
+                // A load unloaded since failing says nothing about the model in use (none).
+                if self.active_model.is_some() {
+                    self.status = Status::Error(e);
+                }
             }
             Event::RuntimeFailed(e) => {
                 crate::app_log!("inference runtime failed: {e}");
@@ -1836,13 +1854,30 @@ impl TranslatorView {
             )
     }
 
-    /// Swaps the languages (when both are explicit) and moves the translation into the source.
+    /// Swaps the languages and moves the translation into the source. With Japanese ⇄ English
+    /// as the target, an explicit source becomes the translation's language (the target stays).
     fn swap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let (SourceChoice::Lang(s), TargetChoice::Lang(t)) =
-            (self.source_choice, self.target_choice)
-        {
-            self.source_choice = SourceChoice::Lang(t);
-            self.target_choice = TargetChoice::Lang(s);
+        // Easy Japanese is a target only: its text is Japanese as a source.
+        let as_source = |code: &'static str| {
+            if code == engine::pfml::JA_EASY {
+                "ja"
+            } else {
+                code
+            }
+        };
+        let swapped = match (self.source_choice, self.target_choice) {
+            (SourceChoice::Lang(s), TargetChoice::Lang(t)) => {
+                Some((SourceChoice::Lang(as_source(t)), TargetChoice::Lang(s)))
+            }
+            (SourceChoice::Lang(s), TargetChoice::JapaneseEnglish) => Some((
+                SourceChoice::Lang(TargetChoice::JapaneseEnglish.resolve_for(s == "ja")),
+                TargetChoice::JapaneseEnglish,
+            )),
+            _ => None,
+        };
+        if let Some((source, target)) = swapped {
+            self.source_choice = source;
+            self.target_choice = target;
             let (source_choice, target_choice) = (self.source_choice, self.target_choice);
             self.source_select.update(cx, |state, cx| {
                 state.set_selected_value(&source_choice, window, cx)

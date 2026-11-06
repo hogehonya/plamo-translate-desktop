@@ -231,15 +231,30 @@ impl Settings {
     }
 
     fn read_from_disk(move_invalid: bool) -> Self {
-        let Some(path) = settings_path() else {
-            return Self::default();
+        match settings_path() {
+            Some(path) => Self::read_path(&path, move_invalid),
+            None => Self::default(),
+        }
+    }
+
+    fn read_path(path: &std::path::Path, move_invalid: bool) -> Self {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(e) => {
+                crate::app_log!("cannot read the settings in {}: {e}", path.display());
+                return Self::default();
+            }
         };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        serde_json::from_str(&text).unwrap_or_else(|e| {
+        // Editors on Windows may save it with a byte order mark, or in another encoding; the
+        // latter is kept aside like any file that does not parse, rather than overwritten.
+        let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+        let parsed = std::str::from_utf8(bytes)
+            .map_err(|e| format!("not UTF-8: {e}"))
+            .and_then(|text| serde_json::from_str(text).map_err(|e| e.to_string()));
+        parsed.unwrap_or_else(|e| {
             let aside = path.with_extension("json.invalid");
-            let moved = move_invalid && std::fs::rename(&path, &aside).is_ok();
+            let moved = move_invalid && std::fs::rename(path, &aside).is_ok();
             crate::app_log!(
                 "ignoring invalid settings in {}: {e}{}",
                 path.display(),
@@ -275,6 +290,21 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::Settings;
+
+    #[test]
+    fn reads_a_byte_order_mark_and_keeps_other_encodings_aside() {
+        let dir = std::env::temp_dir().join(format!("plamo-settings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, b"\xEF\xBB\xBF{\"license_accepted\": true}").unwrap();
+        assert!(Settings::read_path(&path, true).license_accepted);
+        // Not UTF-8 (Shift_JIS): kept aside rather than read as garbage and saved over.
+        std::fs::write(&path, b"{\"glossary\": \"\x93\xfa\x96\x7b\"}").unwrap();
+        assert!(Settings::read_path(&path, true).glossary.is_empty());
+        assert!(!path.exists());
+        assert!(path.with_extension("json.invalid").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn missing_fields_take_defaults() {

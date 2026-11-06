@@ -58,8 +58,9 @@ pub struct ModelsPanel {
     active: Option<&'static str>,
     recommended: &'static CatalogEntry,
     license_accepted: bool,
-    /// A download to switch to as soon as it finishes (set when no model is active).
-    use_when_done: Option<&'static str>,
+    /// Whether the first download to finish becomes the active model: set when a download
+    /// starts with no model active, cleared when one becomes active or no download is left.
+    use_when_done: bool,
     catalog_status: CatalogStatus,
     catalog_cache: PathBuf,
     _events: Task<()>,
@@ -97,13 +98,28 @@ impl ModelsPanel {
             active: None,
             recommended,
             license_accepted,
-            use_when_done: None,
+            use_when_done: false,
             catalog_status: CatalogStatus::Checking,
             catalog_cache,
             _events: events,
             _refresh: Task::ready(()),
         };
         this.refresh_catalog(cx);
+        // Partial downloads of revisions no longer in the catalog can never be resumed (PFN
+        // stops serving replaced files), and can be gigabytes.
+        let store = this.store().clone();
+        cx.background_spawn(async move {
+            for entry in catalog::entries() {
+                let freed = store.remove_stale_partials(entry);
+                if freed > 0 {
+                    crate::app_log!(
+                        "removed a partial download of an older revision of {} ({freed} bytes)",
+                        entry.id()
+                    );
+                }
+            }
+        })
+        .detach();
         this
     }
 
@@ -162,6 +178,10 @@ impl ModelsPanel {
 
     pub fn set_active(&mut self, entry: Option<&'static CatalogEntry>, cx: &mut Context<Self>) {
         self.active = entry.map(CatalogEntry::id);
+        // A model chosen meanwhile is not replaced by a download finishing later.
+        if self.active.is_some() {
+            self.use_when_done = false;
+        }
         cx.notify();
     }
 
@@ -173,19 +193,21 @@ impl ModelsPanel {
             DownloadEvent::Finished { entry, path } => {
                 crate::app_log!("download finished: {}", path.display());
                 self.progress.remove(entry.id());
-                if self.use_when_done == Some(entry.id()) {
-                    self.use_when_done = None;
+                if self.use_when_done && self.active.is_none() {
+                    self.use_when_done = false;
                     cx.emit(ModelsEvent::Use(entry));
                 }
             }
             DownloadEvent::Cancelled { entry } => {
                 crate::app_log!("download cancelled: {}", entry.id());
                 self.progress.remove(entry.id());
+                self.use_when_done &= !self.progress.is_empty();
             }
             DownloadEvent::Failed { entry, error } => {
                 crate::app_log!("download failed: {}: {error}", entry.id());
                 self.progress.remove(entry.id());
                 self.errors.insert(entry.id(), error);
+                self.use_when_done &= !self.progress.is_empty();
             }
         }
         cx.notify();
@@ -214,8 +236,8 @@ impl ModelsPanel {
                 average_bytes_per_second: 0.0,
             },
         );
-        if self.active.is_none() && self.use_when_done.is_none() {
-            self.use_when_done = Some(entry.id());
+        if self.active.is_none() {
+            self.use_when_done = true;
         }
         self.downloads.start(entry);
         cx.notify();
@@ -223,9 +245,6 @@ impl ModelsPanel {
 
     fn cancel(&mut self, entry: &'static CatalogEntry, cx: &mut Context<Self>) {
         self.downloads.cancel(entry);
-        if self.use_when_done == Some(entry.id()) {
-            self.use_when_done = None;
-        }
         cx.notify();
     }
 
@@ -265,20 +284,32 @@ impl ModelsPanel {
         });
     }
 
-    /// Deletes the files of a model that is not loaded.
-    pub fn delete(&mut self, entry: &'static CatalogEntry, reason: &str, cx: &mut Context<Self>) {
+    /// Deletes the files of a model that is not loaded. Returns whether they are gone; a
+    /// failure shows in the model's row.
+    pub fn delete(
+        &mut self,
+        entry: &'static CatalogEntry,
+        reason: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         crate::app_log!(
             "deleting model {} ({reason}): {}",
             entry.id(),
             self.store().path(entry).display()
         );
-        if let Err(e) = self.store().delete(entry) {
-            crate::app_log!("deleting {} failed: {e}", entry.id());
-            self.errors.insert(entry.id(), e.to_string());
-        } else {
-            self.errors.remove(entry.id());
-        }
+        let deleted = match self.store().delete(entry) {
+            Ok(()) => {
+                self.errors.remove(entry.id());
+                true
+            }
+            Err(e) => {
+                crate::app_log!("deleting {} failed: {e}", entry.id());
+                self.errors.insert(entry.id(), e.to_string());
+                false
+            }
+        };
         cx.notify();
+        deleted
     }
 
     fn render_row(&self, entry: &'static CatalogEntry, cx: &mut Context<Self>) -> AnyElement {

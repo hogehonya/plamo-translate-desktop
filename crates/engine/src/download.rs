@@ -90,6 +90,7 @@ pub fn download(
     is_cancelled: &dyn Fn() -> bool,
 ) -> Result<PathBuf, DownloadError> {
     std::fs::create_dir_all(store.dir())?;
+    store.remove_stale_partials(entry);
     let part_path = store.partial_path(entry);
     let total = entry.bytes;
 
