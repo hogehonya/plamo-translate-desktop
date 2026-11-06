@@ -33,6 +33,8 @@ fn custom_model() -> Option<PathBuf> {
 }
 
 fn main() {
+    // SAFETY: first thing in main, before any thread starts.
+    unsafe { appdata::devices::configure_openvino() };
     let custom_model = custom_model();
     applog::init(&settings::log_path());
     app_log!(

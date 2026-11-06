@@ -1,6 +1,7 @@
 name: Release
 
-# Builds the Windows and Linux packages with the size-optimized `dist` profile.
+# Builds the Windows and Linux packages with the size-optimized `dist` profile, and the Windows
+# package for Intel NPUs.
 # - Pushing a tag `vX.Y.Z` (matching the workspace version) publishes a GitHub release.
 # - Running the workflow manually builds the packages as artifacts only, from any branch.
 
@@ -126,7 +127,13 @@ jobs:
     runs-on: windows-2025
     env:
       PACKAGE: plamo-translate-desktop-${{ needs.version.outputs.version }}-windows-x86_64
+      # The same plus the OpenVINO backend, for Intel NPUs.
+      NPU_PACKAGE: plamo-translate-desktop-${{ needs.version.outputs.version }}-windows-x86_64-intel-npu
       VULKAN_VERSION: 1.4.363.1
+      # The version llama.cpp's OpenVINO backend is validated with (docs/backend/OPENVINO.md).
+      OPENVINO_VERSION: 2026.4.1
+      OPENVINO_BUILD: 22982.07f9c262b05
+      OPENCL_SDK_VERSION: v2026.05.29
       # A short target directory keeps llama.cpp's nested CMake build paths under MAX_PATH.
       CARGO_TARGET_DIR: D:\t
     steps:
@@ -143,6 +150,53 @@ jobs:
           if (-not (Test-Path "$sdk\Bin\glslc.exe")) { throw "Vulkan SDK was not installed to $sdk" }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      # For the Intel NPU package. The OpenVINO backend builds against the OpenVINO archive's
+      # headers and import libraries and the OpenCL SDK's. The package ships the OpenVINO DLLs
+      # of the same build from the `openvino` wheel on PyPI, which is under Apache-2.0 (the
+      # archive's runtime is under Intel's distribution license), and the SDK's OpenCL loader.
+      - uses: actions/cache@v6
+        id: openvino-cache
+        with:
+          path: D:\openvino
+          key: openvino-${{ env.OPENVINO_VERSION }}-${{ env.OPENVINO_BUILD }}-${{ env.OPENCL_SDK_VERSION }}
+
+      - name: Install OpenVINO and OpenCL
+        if: steps.openvino-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $dir = 'D:\openvino'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $name = "openvino_toolkit_windows_$env:OPENVINO_VERSION.$($env:OPENVINO_BUILD)_x86_64"
+          curl.exe -fsSL -o "$dir\toolkit.zip" "https://storage.openvinotoolkit.org/repositories/openvino/packages/$env:OPENVINO_VERSION/windows/$name.zip"
+          Expand-Archive "$dir\toolkit.zip" $dir
+          Remove-Item "$dir\toolkit.zip"
+          $toolkit = Get-ChildItem $dir -Directory -Filter 'openvino_toolkit_*' | Select-Object -First 1
+          Rename-Item $toolkit.FullName 'toolkit'
+          if (-not (Test-Path "$dir\toolkit\runtime\cmake\OpenVINOConfig.cmake")) { throw 'OpenVINO toolkit not found' }
+
+          python -m pip download "openvino==$env:OPENVINO_VERSION" --no-deps --only-binary=:all: `
+            --platform win_amd64 --python-version 3.12 -d "$dir\download"
+          $wheel = Get-ChildItem "$dir\download\openvino-*.whl" | Select-Object -First 1
+          $build = $env:OPENVINO_BUILD.Split('.')[0]
+          if ($wheel.Name -notlike "*-$build-*") { throw "$($wheel.Name) is not build $build" }
+          Copy-Item $wheel.FullName "$dir\wheel.zip"
+          Expand-Archive "$dir\wheel.zip" "$dir\wheel"
+          Remove-Item "$dir\wheel.zip", "$dir\download" -Recurse
+
+          $sdk = "OpenCL-SDK-$env:OPENCL_SDK_VERSION-Win-x64"
+          curl.exe -fsSL -o "$dir\opencl.zip" "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/$env:OPENCL_SDK_VERSION/$sdk.zip"
+          Expand-Archive "$dir\opencl.zip" $dir
+          Remove-Item "$dir\opencl.zip"
+          Rename-Item "$dir\$sdk" 'opencl'
+          Get-ChildItem $dir | Format-Table Name
+
+      - name: Enable the OpenVINO backend
+        shell: pwsh
+        run: |
+          # llama-cpp-sys-2 passes GGML_* and CMAKE_* variables to CMake.
+          "GGML_OPENVINO=ON" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CMAKE_PREFIX_PATH=D:/openvino/toolkit/runtime/cmake;D:/openvino/opencl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
@@ -163,8 +217,29 @@ jobs:
             D:\c\git\db
             D:\t
           # Keyed on the rustc version: build outputs from an older compiler are not reusable.
-          key: windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-
+          key: windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-ov${{ env.OPENVINO_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-ov${{ env.OPENVINO_VERSION }}-
+            windows-dist-${{ steps.toolchain.outputs.cachekey }}-${{ env.VULKAN_VERSION }}-
+
+      # llama.cpp builds with Ninja and the MSVC environment: with the Visual Studio 2026
+      # generator, MSBuild runs the install step of ggml-vulkan's vulkan-shaders-gen external
+      # project before its build step on a fresh build (MSB8066).
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Use Ninja for CMake
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { python -m pip install ninja }
+          ninja --version
+          "CMAKE_GENERATOR=Ninja" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # llama-cpp-sys-2 reruns its build when a GGML_* variable it saw changes, not when one
+      # appears, so a cache from before GGML_OPENVINO keeps a build without the backend.
+      - name: Rebuild a cached llama.cpp that lacks the OpenVINO backend
+        shell: pwsh
+        run: |
+          $module = Get-ChildItem "$env:CARGO_TARGET_DIR\dist\build\llama-cpp-sys-2-*\out\backends\ggml-openvino.dll" -ErrorAction SilentlyContinue
+          if (-not $module) { cargo clean -p llama-cpp-sys-2 --profile dist }
 
       - run: cargo build --workspace --profile dist --bins --examples --locked --features $env:DIST_FEATURES
 
@@ -239,6 +314,49 @@ jobs:
         with:
           name: ${{ env.PACKAGE }}
           path: ${{ env.PACKAGE }}.zip
+
+      # The package above plus the OpenVINO backend and the OpenVINO NPU runtime. Only the NPU
+      # plugin is shipped, so OpenVINO computes on the NPU (see `Runtime::devices`).
+      - name: Package for Intel NPUs
+        shell: pwsh
+        run: |
+          $profile_dir = Join-Path $env:CARGO_TARGET_DIR 'dist'
+          $npu = "dist\$env:NPU_PACKAGE"
+          Copy-Item -Recurse "dist\$env:PACKAGE" $npu
+          $out = Get-ChildItem "$profile_dir\build\llama-cpp-sys-2-*\out" -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName 'backends') } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Copy-Item "$($out.FullName)\backends\ggml-openvino.dll" $npu
+          $libs = 'D:\openvino\wheel\openvino\libs'
+          foreach ($dll in 'openvino.dll', 'openvino_intel_npu_plugin.dll', 'openvino_intel_npu_compiler.dll',
+                           'openvino_intel_npu_compiler_loader.dll', 'openvino_intel_npu_vm_runtime.dll',
+                           'tbb12.dll', 'tbbbind_2_5.dll', 'tbbmalloc.dll') {
+            Copy-Item "$libs\$dll" $npu
+          }
+          Copy-Item 'D:\openvino\opencl\bin\OpenCL.dll' $npu
+          # Their licenses after the package's own notices.
+          $notices = "$npu\THIRD-PARTY-NOTICES.txt"
+          $licensing = Get-ChildItem 'D:\openvino\wheel\openvino-*.dist-info\licenses' -Directory | Select-Object -First 1
+          Add-Content $notices '', (Get-Content licenses\intel-npu.txt -Raw)
+          foreach ($file in 'LICENSE', 'licensing\runtime-third-party-programs.txt', 'licensing\onetbb_third-party-programs.txt') {
+            Add-Content $notices '', (Get-Content (Join-Path $licensing.FullName $file) -Raw)
+          }
+          Get-ChildItem $npu | Format-Table Name, Length
+          # Smoke test: the OpenVINO backend and the DLLs it needs load. The runner has no NPU, so
+          # no OpenVINO device is listed.
+          Copy-Item "$profile_dir\examples\translate.exe" $npu
+          $log = & "$npu\translate.exe" --list-devices --verbose 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { Write-Output $log; throw "translate.exe failed with exit code $LASTEXITCODE" }
+          if ($log -notmatch 'loaded OPENVINO backend') { Write-Output $log; throw 'the OpenVINO backend did not load' }
+          Remove-Item "$npu\translate.exe"
+          & "$npu\plamo-translate-host.exe" --check
+          if ($LASTEXITCODE -ne 0) { throw "plamo-translate-host.exe failed with exit code $LASTEXITCODE" }
+          Compress-Archive -Path $npu -DestinationPath "$env:NPU_PACKAGE.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.NPU_PACKAGE }}
+          path: ${{ env.NPU_PACKAGE }}.zip
 
       # For testing the engine on Windows GPUs: place translate.exe next to the package's DLLs.
       - name: Upload the translate CLI (manual runs)

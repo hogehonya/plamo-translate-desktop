@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use engine::StopReason;
-use engine::llama::{Device, RuntimeOptions, SessionOptions};
+use engine::llama::{Device, RuntimeOptions};
 use engine::models::{self as catalog, CatalogEntry, LocalState, ModelStore};
 use engine::pfml::{GlossaryEntry, LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
@@ -869,7 +869,7 @@ impl TranslatorView {
         self.worker.load(LoadRequest {
             path,
             model: backend::model_options(device),
-            session: SessionOptions::default().with_auto_threads(),
+            session: backend::session_options(device),
         });
     }
 

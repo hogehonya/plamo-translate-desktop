@@ -1,0 +1,12 @@
+OpenVINO and the OpenCL ICD loader (Windows package for Intel NPUs only)
+------------------------------------------------------------------------
+
+openvino.dll, openvino_intel_npu_*.dll, tbb12.dll, tbbbind_2_5.dll and tbbmalloc.dll are the
+OpenVINO(TM) runtime with its NPU plugin and oneTBB, taken unmodified from the `openvino` package
+on PyPI (https://pypi.org/project/openvino/), which is licensed under the Apache License,
+Version 2.0. Copyright (C) 2018-2026 Intel Corporation. Its license and the notices of the
+third-party components it contains follow.
+
+OpenCL.dll is the Khronos OpenCL ICD loader (https://github.com/KhronosGroup/OpenCL-ICD-Loader)
+from the Khronos OpenCL SDK, licensed under the Apache License, Version 2.0, the text of which
+follows. Copyright (c) 2016-2020 The Khronos Group Inc.

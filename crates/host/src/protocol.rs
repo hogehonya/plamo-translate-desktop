@@ -71,7 +71,7 @@ pub struct DeviceChoice {
     /// Such as `Vulkan0`.
     pub name: String,
     pub description: String,
-    /// `gpu`, `integrated_gpu`, or `other`.
+    /// `gpu`, `integrated_gpu`, `npu`, or `other`.
     pub kind: &'static str,
     pub memory_free: u64,
 }

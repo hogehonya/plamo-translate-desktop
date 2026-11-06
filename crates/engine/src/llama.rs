@@ -71,24 +71,35 @@ impl Runtime {
     }
 
     /// Lists the compute devices llama.cpp can use.
+    ///
+    /// The OpenVINO backend (in packages for Intel NPUs) registers every OpenVINO device but
+    /// computes only on the one it chose at startup, which is the NPU when the NPU plugin is the
+    /// only OpenVINO plugin shipped. Only that NPU is listed, as [`DeviceKind::Npu`].
     pub fn devices(&self) -> Vec<Device> {
         llama_cpp_2::list_llama_ggml_backend_devices()
             .into_iter()
-            .map(|d| Device {
-                index: d.index,
-                name: d.name,
-                // CPU names come padded with spaces.
-                description: d.description.trim().to_owned(),
-                backend: d.backend,
-                memory_total: d.memory_total as u64,
-                memory_free: d.memory_free as u64,
-                kind: match d.device_type {
-                    LlamaBackendDeviceType::Cpu => DeviceKind::Cpu,
-                    LlamaBackendDeviceType::Gpu => DeviceKind::Gpu,
-                    LlamaBackendDeviceType::IntegratedGpu => DeviceKind::IntegratedGpu,
-                    LlamaBackendDeviceType::Accelerator => DeviceKind::Accelerator,
-                    LlamaBackendDeviceType::Unknown => DeviceKind::Unknown,
-                },
+            .filter_map(|d| {
+                let device = Device {
+                    index: d.index,
+                    name: d.name,
+                    // CPU names come padded with spaces.
+                    description: d.description.trim().to_owned(),
+                    backend: d.backend,
+                    memory_total: d.memory_total as u64,
+                    memory_free: d.memory_free as u64,
+                    kind: match d.device_type {
+                        LlamaBackendDeviceType::Cpu => DeviceKind::Cpu,
+                        LlamaBackendDeviceType::Gpu => DeviceKind::Gpu,
+                        LlamaBackendDeviceType::IntegratedGpu => DeviceKind::IntegratedGpu,
+                        LlamaBackendDeviceType::Accelerator => DeviceKind::Accelerator,
+                        LlamaBackendDeviceType::Unknown => DeviceKind::Unknown,
+                    },
+                };
+                if device.backend == OPENVINO {
+                    openvino_npu(device)
+                } else {
+                    Some(device)
+                }
             })
             .collect()
     }
@@ -109,7 +120,10 @@ impl Runtime {
                 // the weights in the process's memory for as long as the model is loaded. Read
                 // it instead, so the host copy is freed once the weights are uploaded.
                 .with_use_mmap(layers.is_some()),
-            None => params.with_n_gpu_layers(0),
+            // No devices at all: by default llama.cpp also gives every GPU-type device large
+            // operations of a CPU model (op offload), which would use a GPU the user chose not
+            // to use, or the placeholder OpenVINO registers without an NPU, which fails.
+            None => params.with_devices(&[])?.with_n_gpu_layers(0),
         };
         let model = LlamaModel::load_from_file(&self.backend, path, &params)?;
         let specials = SpecialTokens::resolve(&model)?;
@@ -132,11 +146,34 @@ fn dev_backends_dir() -> Option<&'static Path> {
     exe.starts_with(&profile_dir).then_some(dir)
 }
 
+/// The backend name of ggml's OpenVINO backend.
+const OPENVINO: &str = "OPENVINO";
+
+/// The OpenVINO device as listed: the NPU the backend computes on, or `None` for any other.
+///
+/// The backend describes its devices as `GGML_OPENVINO_DEVICE=NPU (selected) - Intel(R) AI
+/// Boost`: the OpenVINO device id, whether it is the one computed on, and the device's name.
+/// Without any OpenVINO device it registers a placeholder `CPU`, which is left out too.
+fn openvino_npu(mut device: Device) -> Option<Device> {
+    let rest = device.description.strip_prefix("GGML_OPENVINO_DEVICE=")?;
+    let (id, name) = rest.split_once(" - ").unwrap_or((rest, ""));
+    let id = id.strip_suffix(" (selected)")?;
+    if !id.starts_with("NPU") {
+        return None;
+    }
+    device.description = if name.is_empty() { id } else { name }.to_owned();
+    device.name = "NPU".to_owned();
+    device.kind = DeviceKind::Npu;
+    Some(device)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceKind {
     Cpu,
     Gpu,
     IntegratedGpu,
+    /// An NPU, through OpenVINO. Used only when chosen: it is not picked automatically.
+    Npu,
     Accelerator,
     Unknown,
 }
@@ -180,6 +217,8 @@ pub struct SessionOptions {
     pub n_threads: Option<i32>,
     /// CPU threads for prompt processing. `None` uses llama.cpp's default.
     pub n_threads_batch: Option<i32>,
+    /// Keep the sliding-window layers' cache as long as the context instead of only the window.
+    pub swa_full: bool,
 }
 
 impl SessionOptions {
@@ -192,7 +231,20 @@ impl SessionOptions {
         self.n_threads_batch = Some(physical);
         self
     }
+
+    /// Settings for an NPU ([`DeviceKind::Npu`]), whose graphs have fixed shapes: every token
+    /// costs as much as at the end of a full context, so the context is shorter (long texts are
+    /// translated in chunks that fit, see `crate::document`). The OpenVINO backend also sizes
+    /// every attention mask for the whole context, so the sliding-window cache must be as long.
+    pub fn for_npu(mut self) -> Self {
+        self.n_ctx = NPU_CONTEXT;
+        self.swa_full = true;
+        self
+    }
 }
+
+/// Context size on an NPU (see [`SessionOptions::for_npu`]).
+pub const NPU_CONTEXT: u32 = 8192;
 
 impl Default for SessionOptions {
     fn default() -> Self {
@@ -202,6 +254,7 @@ impl Default for SessionOptions {
             n_batch: 2048,
             n_threads: None,
             n_threads_batch: None,
+            swa_full: false,
         }
     }
 }
@@ -281,12 +334,13 @@ impl Model {
 
     pub fn session(&self, runtime: &Runtime, options: &SessionOptions) -> Result<Session<'_>> {
         // Each request starts from an empty KV cache and never rewinds, so sliding-window
-        // layers only need the window instead of a full-length cache. For PLaMo 3 (7 of every 8
-        // layers use a 2048-token window) this cuts the cache by about 5x at 32k tokens.
+        // layers only need the window instead of a full-length cache (unless `swa_full`). For
+        // PLaMo 3 (7 of every 8 layers use a 2048-token window) this cuts the cache by about 5x
+        // at 32k tokens.
         let mut params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(options.n_ctx))
             .with_n_batch(options.n_batch.min(options.n_ctx))
-            .with_swa_full(false);
+            .with_swa_full(options.swa_full);
         if let Some(n) = options.n_threads {
             params = params.with_n_threads(n);
         }
@@ -427,5 +481,49 @@ impl TranslationBackend for Session<'_> {
             retries: 0,
             cut: 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Device, DeviceKind, openvino_npu};
+
+    fn openvino(description: &str) -> Device {
+        Device {
+            index: 0,
+            name: "OPENVINO0".into(),
+            description: description.into(),
+            backend: "OPENVINO".into(),
+            memory_total: 0,
+            memory_free: 0,
+            kind: DeviceKind::Gpu,
+        }
+    }
+
+    #[test]
+    fn lists_only_the_selected_openvino_npu() {
+        let npu = openvino_npu(openvino(
+            "GGML_OPENVINO_DEVICE=NPU (selected) - Intel(R) AI Boost (NPU 5010)",
+        ))
+        .unwrap();
+        assert_eq!(
+            (npu.name.as_str(), npu.description.as_str(), npu.kind),
+            ("NPU", "Intel(R) AI Boost (NPU 5010)", DeviceKind::Npu)
+        );
+        // The placeholder registered without any OpenVINO device, devices not computed on,
+        // and other OpenVINO devices are left out.
+        for description in [
+            "GGML_OPENVINO_DEVICE=CPU (selected) - CPU",
+            "GGML_OPENVINO_DEVICE=NPU - Intel(R) AI Boost",
+            "GGML_OPENVINO_DEVICE=GPU.0 (selected) - Intel(R) Arc(TM) Graphics",
+            "Intel(R) AI Boost",
+        ] {
+            assert!(
+                openvino_npu(openvino(description)).is_none(),
+                "{description}"
+            );
+        }
+        let bare = openvino_npu(openvino("GGML_OPENVINO_DEVICE=NPU (selected)")).unwrap();
+        assert_eq!(bare.description, "NPU");
     }
 }

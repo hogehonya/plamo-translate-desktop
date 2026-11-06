@@ -1,6 +1,6 @@
 # PLaMo Translate Desktop — Design
 
-Status: describes the code as of v0.2.1 (released 2026-11-06). Update it together with the code.
+Status: describes the code after v0.2.1 (released 2026-11-06), towards v0.3.0. Update it together with the code.
 
 ## 1. Goal
 
@@ -294,6 +294,8 @@ The implementation is `engine::llama::Session` (one llama.cpp context of a loade
   - `cpu`.
   - A device name such as `Vulkan0`. If that device disappears, the app falls back to `auto`.
 - The model is fully offloaded to the selected GPU. Partial offload (GPU layers) is a possible later setting.
+- On the CPU the model gets an empty device list: by default llama.cpp also hands large operations to every GPU-type device (op offload),
+  which would use a GPU the user chose not to use (or OpenVINO's placeholder device, which fails).
 - The context length is fixed at 32768, the maximum the model was trained with, and is not a setting.
   - The KV cache for sliding-window layers is limited to the window (`swa_full = false`). This is safe because every request starts from an empty cache.
   - At 32k this needs 0.05 / 0.3 / 0.4 / 1.6 GiB of KV cache for 0.8B / 2B / 8B / 31B. With a full SWA cache it would be 0.26 / 1.5 / 2.0 / 8.2 GiB.
@@ -303,6 +305,25 @@ The implementation is `engine::llama::Session` (one llama.cpp context of a loade
 - Memory check: the app estimates the file size × 1.2 + 384 MiB.
   If that exceeds the free memory of the selected device, the dialog shows a warning; the model still loads.
 - Changing the device reloads the model. The status bar shows the model and the device, for example `2B · Q4_K_M · Vulkan0`.
+- Intel NPUs (the Windows `-intel-npu` package; experimental) run through llama.cpp's OpenVINO backend (`ggml-openvino`):
+  - The backend registers every OpenVINO device (`OPENVINO0`…) but computes only on the one chosen by `GGML_OPENVINO_DEVICE`
+    when it loads, and aborts if that one is missing. So the variable is left unset and the package ships OpenVINO's NPU plugin only:
+    the NPU is then the only OpenVINO device and is chosen. Without an NPU the backend registers a placeholder `CPU`.
+  - `Runtime::devices` lists only the OpenVINO device computed on, and only if it is an NPU, as `DeviceKind::Npu` named `NPU`
+    (from the description `GGML_OPENVINO_DEVICE=NPU (selected) - <name>`). `auto` never picks it.
+  - On an NPU the graphs have fixed shapes (prompts in 256-token chunks, every mask as wide as the context), so the session
+    uses an 8192-token context (`SessionOptions::for_npu`) and long texts get smaller chunks and history.
+    The sliding-window cache is full length there (`swa_full`): with a windowed cache the backend's mask for those layers
+    does not match their cache and the graph fails to compile.
+  - The first translation compiles the model for the NPU. When the module ships next to the executable, `GGML_OPENVINO_CACHE_DIR`
+    is set at start-up to `openvino-cache` in the data directory, so the compiled graphs are reused (the variable is read once, when the backend loads).
+  - Checked without an NPU on OpenVINO's CPU device with `GGML_OPENVINO_FORCE_STATIC=1` (the NPU's fixed-shape path):
+    the same translations as the CPU backend, apart from rare one-word differences.
+  - Measured on a Core Ultra 7 356H (Panther Lake, 50 TOPS NPU) with 2B Q4_K_M: about 30 tok/s on the NPU, 40 on the CPU,
+    and 70 on the integrated GPU through Vulkan. Generation is memory-bound, the NPU reads memory more slowly than the GPU,
+    and its fixed shapes add the whole context's attention to every token. The NPU is for lower power and a free GPU.
+  - The package must ship OpenVINO's NPU compiler (`openvino_intel_npu_compiler.dll`, 100 MB): without it the NPU does not work,
+    so the compiler in the NPU driver is not enough.
 
 ## 9. UI
 
@@ -424,6 +445,13 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
   - Windows: a portable zip with the exe, the DLLs and backend modules, the Visual C++ runtime, the READMEs, the licenses,
     and `THIRD-PARTY-NOTICES.txt`.
   - Linux: a tar.gz with the same contents (no Visual C++ runtime), a desktop entry, and its icon.
+  - Windows for Intel NPUs: the Windows zip plus `ggml-openvino.dll`, the OpenVINO runtime and NPU plugin with oneTBB, and the OpenCL loader.
+    The Windows build always includes the OpenVINO backend (`GGML_OPENVINO=ON`, built against the OpenVINO archive and the Khronos OpenCL SDK);
+    only this package ships it. The OpenVINO DLLs come from the `openvino` wheel on PyPI of the same build, which is Apache-2.0,
+    because the archive's runtime is under Intel's distribution license. Their notices are appended to `THIRD-PARTY-NOTICES.txt` (`licenses/intel-npu.txt`).
+    llama-cpp-sys-2 forwards `GGML_*` variables to CMake but reruns only when one it saw changes, so the workflow cleans it when a restored cache has no `ggml-openvino.dll`.
+  - On Windows, llama.cpp builds with Ninja in the MSVC environment: the Visual Studio 2026 generator runs the install step of ggml-vulkan's
+    `vulkan-shaders-gen` external project before its build step on a fresh build (MSB8066).
   - `THIRD-PARTY-NOTICES.txt` is generated by `scripts/notices.sh`: cargo-about (`about.toml`, `about.hbs`) for the Rust crates,
     then `licenses/` for llama.cpp/ggml, the Lucide icons, and (Windows) the Visual C++ runtime.
   - Build caches are keyed on the rustc version. A tag can restore only its own caches and those of the default branch,
@@ -502,6 +530,7 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
 Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2), device selection (M3),
 translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
 Then v0.2.0 (2026-11-06): the browser extension (§12); v0.2.1: clearer failures of page translation from the panel.
+Towards v0.3.0: Intel NPUs through OpenVINO (§8).
 
 Possible later work:
 

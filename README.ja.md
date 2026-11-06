@@ -47,6 +47,12 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
 - **Windows**（10 以降）: 展開して `plamo-translate-desktop.exe` を実行します。同梱の DLL は exe と同じフォルダに置いたままにしてください。
   llama.cpp 本体と、CPU・Vulkan のバックエンドはそこから読み込み、それ以外の場所からは読み込みません。
   Visual C++ ランタイムも同梱しているので、ほかに何かをインストールする必要はありません。
+- **Intel の NPU を積んだ Windows**（Core Ultra、試験的）: `-intel-npu` の zip は、同じアプリに OpenVINO の NPU ランタイムを加えたものです。
+  設定のデバイスで **NPU** を選びます（「自動」では選ばれません）。モデルを読み込んで最初の翻訳では、NPU 向けのコンパイルに時間がかかります。
+  結果はキャッシュするので、次からの起動では速くなります。NPU ではコンテキストが 8192 トークンなので、長文は小さめに区切って訳します。
+  NPU のドライバは、PC のドライバか Windows Update で入ります。
+  NPU は速さより、消費電力を抑えたり GPU を空けておいたりするためのものです。Core Ultra 7 356H では、2B の翻訳速度は
+  NPU で毎秒 30 トークンほど、CPU で 40、内蔵 GPU（Vulkan）で 70 でした。
 - **Linux**: 展開して `plamo-translate-desktop` を実行します。同梱の共有ライブラリは、実行ファイル自身のフォルダ（`RUNPATH=$ORIGIN`）から読み込みます。
   - Ubuntu 24.04 でビルドしているので、glibc 2.39 以降（Ubuntu 24.04、Debian 13、Fedora 40 以降）が必要です。
     ほかに `libgomp1`、`libxkbcommon-x11-0`、`libxcb1` が必要ですが、デスクトップ環境なら通常は入っています。

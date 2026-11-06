@@ -1,6 +1,6 @@
 //! Inference device and context settings.
 
-pub use appdata::devices::{device_label, model_options, resolve};
+pub use appdata::devices::{device_label, model_options, resolve, session_options};
 use engine::llama::{Device, DeviceKind};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex, v_flex};

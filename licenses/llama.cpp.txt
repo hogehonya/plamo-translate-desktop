@@ -1,8 +1,9 @@
 llama.cpp and ggml
 ------------------
 
-The llama, ggml, ggml-base, ggml-cpu-* and ggml-vulkan libraries next to the executable are built
-from llama.cpp (https://github.com/ggml-org/llama.cpp), vendored by llama-cpp-sys-2.
+The llama, ggml, ggml-base, ggml-cpu-* and ggml-vulkan libraries next to the executable (and
+ggml-openvino in the package for Intel NPUs) are built from llama.cpp
+(https://github.com/ggml-org/llama.cpp), vendored by llama-cpp-sys-2.
 
 MIT License
 

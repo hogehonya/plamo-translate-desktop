@@ -14,7 +14,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, bail};
 use engine::document::{DocumentOptions, Output, Progress, translate_document};
-use engine::llama::{GpuOffload, ModelOptions, Runtime, RuntimeOptions, SessionOptions};
+use engine::llama::{
+    DeviceKind, GpuOffload, ModelOptions, Runtime, RuntimeOptions, SessionOptions,
+};
 use engine::pfml::{Form, GlossaryEntry, LangCode, Prompt, TranslationOptions};
 
 const USAGE: &str = "\
@@ -35,6 +37,9 @@ options:
   --threads N         CPU threads
   --gpu INDEX         offload to the ggml device INDEX (see --list-devices)
   --gpu-layers N      number of layers to offload (default: all)
+  --npu-session       session settings for an NPU (8192-token context, full sliding-window
+                      cache), as used with --gpu on an NPU; for testing OpenVINO's static path
+                      elsewhere with GGML_OPENVINO_FORCE_STATIC=1
   --list-devices      list compute devices and exit
   --check-tokenizer   verify segment tokenization matches raw prompt tokenization
   --verbose           show llama.cpp logs
@@ -56,6 +61,7 @@ struct Args {
     threads: Option<i32>,
     gpu: Option<usize>,
     gpu_layers: Option<u32>,
+    npu_session: bool,
     list_devices: bool,
     check_tokenizer: bool,
     verbose: bool,
@@ -95,6 +101,7 @@ fn parse_args() -> anyhow::Result<Args> {
             "--threads" => args.threads = Some(value()?.parse()?),
             "--gpu" => args.gpu = Some(value()?.parse()?),
             "--gpu-layers" => args.gpu_layers = Some(value()?.parse()?),
+            "--npu-session" => args.npu_session = true,
             "--list-devices" => args.list_devices = true,
             "--check-tokenizer" => args.check_tokenizer = true,
             "--verbose" => args.verbose = true,
@@ -190,6 +197,15 @@ fn main() -> anyhow::Result<()> {
         n_threads: args.threads,
         ..SessionOptions::default()
     };
+    let on_npu = args.gpu.is_some_and(|index| {
+        runtime
+            .devices()
+            .iter()
+            .any(|d| d.index == index && d.kind == DeviceKind::Npu)
+    });
+    if args.npu_session || on_npu {
+        session_options = session_options.for_npu();
+    }
     if let Some(n) = args.n_ctx {
         session_options.n_ctx = n;
     }

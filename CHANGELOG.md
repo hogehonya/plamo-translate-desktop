@@ -2,6 +2,23 @@
 
 All notable changes to PLaMo Translate Desktop. Each release's section here also becomes its release notes on GitHub.
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- A Windows package for Intel NPUs (`…-windows-x86_64-intel-npu.zip`): the regular package plus llama.cpp's OpenVINO backend and the OpenVINO NPU runtime. The NPU shows up as a device named NPU in Settings (and in the extension's panel), next to the CPU and the GPUs; Automatic does not choose it.
+  - On the NPU the context is 8192 tokens (long texts are translated in correspondingly smaller chunks), since its graphs have fixed shapes.
+  - The first translation after loading a model compiles it for the NPU, which takes a while; the compiled graphs are cached in `openvino-cache` in the data folder, so later starts are faster.
+  - The NPU is for using less power and leaving the GPU free rather than for speed. On a Core Ultra 7 356H, 2B translates at about 30 tokens/s on the NPU, 40 on the CPU, and 70 on the integrated GPU.
+
+### Changed
+
+- With the device set to CPU, translation runs on the CPU only. llama.cpp used to hand large operations to a GPU as well.
+
+### Fixed
+
+- Windows packages build again from a clean cache: llama.cpp is now built with Ninja, as the Visual Studio 2026 generator ran its steps out of order.
+
 ## [0.2.1] - 2026-11-06
 
 ### Fixed
@@ -39,6 +56,7 @@ The first release.
 - English and Japanese UI, light and dark themes, and synchronized scrolling between the source and the translation.
 - Packages for Windows and Linux (x86-64), with third-party notices.
 
+[0.3.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/tanakh/plamo-translate-desktop/releases/tag/v0.1.0

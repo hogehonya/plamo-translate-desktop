@@ -48,6 +48,12 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
 - **Windows** (10 or later): unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it:
   llama.cpp and its CPU and Vulkan backends are loaded from there, and only from there.
   The Visual C++ runtime is included, so nothing else needs to be installed.
+- **Windows with an Intel NPU** (Core Ultra; experimental): the `-intel-npu` zip is the same app plus OpenVINO's NPU runtime.
+  Choose **NPU** as the device in Settings; Automatic does not choose it. The first translation after a model loads
+  compiles it for the NPU, which takes a while; the result is cached for later starts. On the NPU the context is 8192 tokens,
+  so long texts go in smaller chunks. The NPU driver comes with the PC's drivers or Windows Update.
+  The NPU is for using less power and leaving the GPU free rather than for speed: on a Core Ultra 7 356H, 2B translates
+  at about 30 tokens/s on the NPU, 40 on the CPU, and 70 on the integrated GPU (Vulkan).
 - **Linux**: extract and run `plamo-translate-desktop`. The shared libraries next to it are found through the executable's own directory (`RUNPATH=$ORIGIN`).
   - It is built on Ubuntu 24.04 and needs glibc 2.39 or later (Ubuntu 24.04, Debian 13, Fedora 40, or newer),
     plus `libgomp1`, `libxkbcommon-x11-0`, and `libxcb1`, which desktop installations usually have.

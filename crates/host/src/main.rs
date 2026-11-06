@@ -20,7 +20,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use appdata::settings::{self, DeviceSetting, Settings};
 use appdata::{app_log, applog, devices, glossary};
 use engine::StopReason;
-use engine::llama::{Device, DeviceKind, Runtime, RuntimeOptions, SessionOptions};
+use engine::llama::{Device, DeviceKind, Runtime, RuntimeOptions};
 use engine::models::{self as catalog, LocalState, ModelStore};
 use engine::pfml::{Form, LangCode, TranslationOptions};
 use engine::worker::{Event, JobId, LoadRequest, Worker};
@@ -30,6 +30,8 @@ use crate::protocol::{DeviceChoice, ModelChoice, Request, Response, read_message
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
+    // SAFETY: first thing in main, before any thread starts.
+    unsafe { appdata::devices::configure_openvino() };
     if std::env::args().any(|arg| arg == "--check") {
         std::process::exit(check());
     }
@@ -272,6 +274,7 @@ impl Host {
                 kind: match d.kind {
                     DeviceKind::Gpu => "gpu",
                     DeviceKind::IntegratedGpu => "integrated_gpu",
+                    DeviceKind::Npu => "npu",
                     _ => "other",
                 },
                 memory_free: d.memory_free,
@@ -354,7 +357,7 @@ impl Host {
         self.worker.load(LoadRequest {
             path,
             model: devices::model_options(device),
-            session: SessionOptions::default().with_auto_threads(),
+            session: devices::session_options(device),
         });
         settings
     }
