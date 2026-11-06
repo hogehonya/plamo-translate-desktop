@@ -59,7 +59,8 @@ export function estimateTokens(text) {
 
 /**
  * Splits `text` into chunks of at most `maxTokens` (estimated): paragraphs, packed together while
- * they fit; a paragraph too large is split at line breaks, then after sentences, then anywhere.
+ * they fit; a paragraph too large is split at line breaks, then after sentences, then between
+ * words, then anywhere.
  * Returns { leading, chunks: [{ text, separator }] }: the translation is `leading`, then each
  * chunk's translation followed by its separator.
  */
@@ -97,8 +98,9 @@ function refine(text, separator, maxTokens, out) {
     out.push({ text, separator });
     return;
   }
-  // Line breaks, then the space after a sentence, then the end of a CJK sentence.
-  for (const boundary of [/\n\s*/g, /(?<=[.!?])\s+/g, /(?<=[。！？])/g]) {
+  // Line breaks, then the space after a sentence, then the end of a CJK sentence (with the
+  // closing brackets after it), then any space.
+  for (const boundary of [/\n\s*/g, /(?<=[.!?])\s+/g, /(?<=[。！？][」』）)]*)(?![」』）)])/g, /\s+/g]) {
     const parts = [];
     let start = 0;
     for (const m of text.matchAll(boundary)) {

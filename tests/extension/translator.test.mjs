@@ -74,6 +74,11 @@ const noBoundary = "あ".repeat(130);
 check("no boundary", [split(noBoundary, 50).chunks.map((c) => c.text.length), rebuilt(split(noBoundary, 50))], [[50, 50, 30], noBoundary]);
 const english = Array.from({ length: 30 }, (_, i) => `Sentence number ${i} is here.`).join(" ");
 check("sentences are lossless", rebuilt(split(english, 40)), english);
+const words = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
+check("words are not cut", split(words, 50).chunks.every((c) => /^word\d+( word\d+)*$/.test(c.text)), true);
+check("words are lossless", rebuilt(split(words, 50)), words);
+const quoted = "「始めましょう。」と彼は言った。".repeat(40);
+check("closing brackets stay with their sentence", split(quoted, 30).chunks.every((c) => !/^[」』）)]/.test(c.text)), true);
 check("sentences fit", split(english, 40).chunks.every((c) => estimateTokens(c.text) <= 40) && split(english, 40).chunks.length > 1, true);
 
 const history = new History(100);

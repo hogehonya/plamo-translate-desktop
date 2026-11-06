@@ -7,8 +7,13 @@
 // these differences:
 // - The models are the ones that fit WebAssembly's memory, downloaded into the extension's
 //   storage (OPFS): `download { model }` fetches one, reporting `download` messages.
-// - The devices are `cpu` and `gpu` (WebGPU), and `auto` measures which is faster.
-// - Status and options carry `engine: "browser"`.
+// - The devices are `cpu` and `gpu` (WebGPU), and `auto` measures which is faster;
+//   `measure { id }` measures again. `configure` also takes `threads` for the CPU.
+// - Status and options carry `engine: "browser"`. Status may also be `released` (no model
+//   loaded yet) or `measuring`, and carries `slots` (the page batches to send at once),
+//   `threads`, `gpuUnavailable`, and `again` (measuring from the button).
+// - `segment` carries the segment's generated `tokens`. `keepalive` messages keep the service
+//   worker running (see the end of this file).
 
 import { Wllama } from "./vendor/wllama/wllama.js";
 import { History, STOP, estimateTokens, prompt, resolveTarget, split } from "./translator.js";
@@ -64,15 +69,26 @@ URL.createObjectURL = (object) =>
   );
 
 const port = chrome.runtime.connect({ name: "engine" });
-const post = (message) => port.postMessage(message);
+// Messages are dropped once the background's end is gone (see the end of this file).
+const post = (message) => {
+  try {
+    port.postMessage(message);
+  } catch {}
+};
 
 /** The extension's choices ("" or absent: the default; 0 threads: wllama's default). */
 let settings = { model: "", device: "auto", threads: 0 };
-/** The model in use: { model, device, wllama }, or null. */
+/**
+ * The model in use: { model, device, wllama, gpu, requestedThreads, threads, calls, waiting },
+ * or null. `calls` counts the wllama calls running on it (see `complete`).
+ */
 let loaded = null;
-/** Settles when the last load (or measurement) asked for ends: they run one after another. */
+/** Settles when the last load, unload or measurement asked for ends: they run one at a time. */
 let loading = Promise.resolve();
-/** The running translations by id: { id, kind, controller, running, finished }. */
+/**
+ * The running translations by id: { id, kind, controller, running, finished, instance }, the
+ * last being the loaded model they translate with.
+ */
 const jobs = new Map();
 // "starting" until the downloaded models are checked (see the end of this file).
 let status = { state: "starting" };
@@ -102,57 +118,98 @@ async function selectedModel() {
   return null;
 }
 
-/** Downloads `model` into OPFS, resuming a partial download. */
+/** The partial download of `model`, named for its revision so that another is never continued. */
+const partName = (model) => `${fileName(model)}.${model.revision.slice(0, 12)}.part`;
+
+/** Removes the partial downloads of `model` other than `keep` (other revisions, older names). */
+async function removeStaleParts(dir, model, keep = null) {
+  const stale = [];
+  for await (const name of dir.keys()) {
+    if (name !== keep && name.startsWith(`${fileName(model)}.`) && name.endsWith(".part")) stale.push(name);
+  }
+  for (const name of stale) await dir.removeEntry(name).catch(() => {});
+}
+
+/**
+ * Downloads `model` into OPFS, resuming a partial download. OPFS keeps what a writable stream
+ * wrote only once it is closed, so it is closed on failures too: the next try resumes from there.
+ * (What arrived since the last close is lost if this document closes meanwhile.)
+ */
 async function download(model) {
   if (downloads.has(model.id)) return;
   downloads.set(model.id, true);
   const report = (extra) => post({ type: "download", model: model.id, total: model.bytes, ...extra });
+  let writable = null;
   try {
+    report({ state: "running", received: 0 });
     const dir = await modelsDir();
-    const partName = `${fileName(model)}.part`;
-    const part = await dir.getFileHandle(partName, { create: true });
-    const existing = (await part.getFile()).size;
-    const response = await fetch(modelUrl(model), existing ? { headers: { Range: `bytes=${existing}-` } } : {});
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const resume = response.status === 206;
-    const writable = await part.createWritable({ keepExistingData: resume });
-    let received = 0;
-    if (resume) {
-      await writable.seek(existing);
-      received = existing;
+    const name = partName(model);
+    await removeStaleParts(dir, model, name);
+    let part = await dir.getFileHandle(name, { create: true });
+    let existing = (await part.getFile()).size;
+    if (existing > model.bytes) {
+      // Not a beginning of this file: start over.
+      await dir.removeEntry(name);
+      part = await dir.getFileHandle(name, { create: true });
+      existing = 0;
     }
-    let reported = 0;
-    const reader = response.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      await writable.write(value);
-      received += value.length;
-      if (received - reported > 8 << 20) {
-        reported = received;
-        report({ state: "running", received });
+    if (existing < model.bytes) {
+      const response = await fetch(modelUrl(model), existing ? { headers: { Range: `bytes=${existing}-` } } : {});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      // A range from elsewhere than the end of the part would corrupt it: start over then.
+      const resume = response.status === 206 && (response.headers.get("content-range") ?? "").startsWith(`bytes ${existing}-`);
+      if (response.status === 206 && !resume) {
+        await response.body?.cancel();
+        await dir.removeEntry(name);
+        throw new Error("the server sent another range; try again");
       }
+      writable = await part.createWritable({ keepExistingData: resume });
+      let received = 0;
+      if (resume) {
+        await writable.seek(existing);
+        received = existing;
+      }
+      let reported = received;
+      const reader = response.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+        received += value.length;
+        if (received - reported > 8 << 20) {
+          reported = received;
+          report({ state: "running", received });
+        }
+      }
+      await writable.close();
+      writable = null;
+      existing = received;
     }
-    await writable.close();
-    if (received !== model.bytes) {
-      throw new Error(`downloaded ${received} bytes instead of ${model.bytes}`);
+    if (existing !== model.bytes) {
+      throw new Error(`downloaded ${existing} bytes instead of ${model.bytes}`);
     }
     await part.move(dir, fileName(model));
-    report({ state: "done", received });
+    report({ state: "done", received: existing });
   } catch (e) {
+    // Keeps what arrived for the next try.
+    await writable?.close().catch(() => {});
     report({ state: "error", message: String(e?.message ?? e) });
   } finally {
     downloads.delete(model.id);
   }
+  enqueue(setIdleStatus);
   sendOptions();
 }
 
 async function deleteModel(model) {
-  if (loaded?.model === model) await unload();
+  // After the load in progress, ending the translations that use the model.
+  await enqueue(async () => {
+    if (loaded?.model === model) await unload();
+  });
   const dir = await modelsDir();
-  for (const name of [fileName(model), `${fileName(model)}.part`]) {
-    await dir.removeEntry(name).catch(() => {});
-  }
+  await dir.removeEntry(fileName(model)).catch(() => {});
+  await removeStaleParts(dir, model);
+  enqueue(setIdleStatus);
   sendOptions();
 }
 
@@ -199,8 +256,8 @@ const MEASURE_TEXT =
  * speeds measured.
  */
 async function measure() {
-  const run = (text) =>
-    loaded.wllama.createCompletion({ prompt: prompt({ text, target: "ja" }), max_tokens: 64, temperature: 0, stop: [STOP] });
+  const instance = loaded;
+  const run = (text) => complete(instance, { prompt: prompt({ text, target: "ja" }), max_tokens: 64, temperature: 0, stop: [STOP] });
   // The first run includes one-time work, such as compiling GPU kernels.
   await run(WARM_UP_TEXT);
   const { timings } = await run(MEASURE_TEXT);
@@ -213,14 +270,18 @@ async function measure() {
 
 // ---- Loading ----
 
+/** Loads `model` on `device` (in the load chain), unless it is loaded already. */
 async function load(model, device) {
-  if (loaded?.model === model && loaded.device === device && loaded.requestedThreads === settings.threads) return;
+  // The thread count matters on the CPU only (also when WebGPU was asked for but not used).
+  if (loaded?.model === model && loaded.device === device && (loaded.gpu || loaded.requestedThreads === settings.threads)) return;
   await unload();
   setStatus({ state: "loading", model: model.label, device: device === "gpu" ? "WebGPU" : "CPU" });
   const file = await (await (await modelsDir()).getFileHandle(fileName(model))).getFile();
-  // llama.cpp's messages while loading tell which device it really uses.
+  // llama.cpp's messages while loading tell which device it really uses. Kept while loading only:
+  // the server logs every request afterwards.
   const lines = [];
-  const keep = (...args) => lines.push(args.join(" "));
+  let collecting = true;
+  const keep = (...args) => collecting && lines.push(args.join(" "));
   const wllama = new Wllama({ default: "./vendor/wllama/wllama.wasm" }, {
     // The layers offloaded are logged at the debug level, the adapter at the log level.
     logger: { debug: keep, log: keep, info: keep, warn: keep, error: (...args) => (keep(...args), console.error(...args)) },
@@ -241,6 +302,7 @@ async function load(model, device) {
     await wllama.exit().catch(() => {});
     throw e;
   }
+  collecting = false;
   loaded = {
     model,
     device,
@@ -248,6 +310,8 @@ async function load(model, device) {
     gpu: device === "gpu" ? usedGpu(lines) : null,
     requestedThreads: settings.threads,
     threads: wllama.getNumThreads(),
+    calls: 0,
+    waiting: [],
   };
   if (device === "gpu" && !loaded.gpu) console.warn("WebGPU was not used:", lines.filter((l) => /webgpu|offload/i.test(l)).join("\n"));
 }
@@ -267,21 +331,74 @@ function usedGpu(lines) {
 /** The device in use, as the status shows it: `WebGPU (amd rdna-4)`, or `CPU`. */
 const deviceLabel = () => (loaded?.gpu ? `WebGPU (${loaded.gpu})` : "CPU");
 
-async function unload() {
-  const current = loaded;
-  loaded = null;
-  await current?.wllama.exit().catch(() => {});
+/**
+ * Runs a completion on `instance` (a loaded model), counted so that unloading waits for it, and
+ * unloading the instance when wllama crashed.
+ */
+async function complete(instance, options) {
+  instance.calls++;
+  try {
+    return await instance.wllama.createCompletion(options);
+  } catch (e) {
+    if (isCrash(e)) crashed(instance, e);
+    throw e;
+  } finally {
+    if (--instance.calls === 0) for (const resolve of instance.waiting.splice(0)) resolve();
+  }
 }
 
+/** Settles when no wllama call runs on `instance`, or after `ms` in case one never ends. */
+const settled = (instance, ms) =>
+  instance.calls === 0
+    ? Promise.resolve()
+    : Promise.race([new Promise((resolve) => instance.waiting.push(resolve)), new Promise((resolve) => setTimeout(resolve, ms))]);
+
+/** A WebAssembly abort (out of memory, a lost GPU device, a failed assertion) kills the module. */
+const isCrash = (e) => /has crashed|\(ABORT\)|RuntimeError|unreachable|bad_alloc/.test(String(e?.message ?? e));
+
+/** After wllama crashed, the model is unloaded, and the next translation loads it again. */
+function crashed(instance, e) {
+  if (instance.crashed) return;
+  instance.crashed = true;
+  console.error("wllama crashed:", e);
+  enqueue(async () => {
+    if (loaded === instance) await unload();
+    setStatus({ state: "error", model: instance.model.label, message: String(e?.message ?? e) });
+  });
+}
+
+/**
+ * Unloads the model (in the load chain). The translations using it end first, reporting
+ * themselves cancelled: wllama's exit() ends its worker without settling the calls it runs.
+ */
+async function unload() {
+  const current = loaded;
+  if (!current) return;
+  loaded = null;
+  for (const j of jobs.values()) if (j.instance === current) j.controller.abort();
+  // A call ends at its next result poll, one step of llama.cpp's loop.
+  await settled(current, 10_000);
+  await current.wllama.exit().catch(() => {});
+}
+
+/** Runs `step` after the loads, unloads and measurements asked for before it, one at a time. */
+function enqueue(step) {
+  const next = loading.then(step);
+  loading = next.catch(() => {});
+  return next;
+}
 
 /**
  * Loads the selected model on the selected device. On `auto` with a GPU, the first load measures
  * the GPU and the CPU and keeps the faster one. Jobs starting together wait for the same load.
  */
-function ensureLoaded() {
-  const next = loading.then(loadSelected);
-  loading = next.catch(() => {});
-  return next;
+const ensureLoaded = () => enqueue(loadSelected);
+
+/** The status while no model is loaded: released, with the model the next translation loads. */
+async function setIdleStatus() {
+  if (loaded) return;
+  const model = await selectedModel();
+  setStatus(model && (await isDownloaded(model)) ? { state: "released", model: model.label } : { state: "no_model" });
 }
 
 async function loadSelected() {
@@ -311,9 +428,15 @@ async function measureDevices(model, gpu, again = false) {
   setStatus({ state: "measuring", model: model.label, again });
   // Infinity, saved as null.
   const failed = { seconds: Infinity };
-  await load(model, "gpu");
-  // Without the GPU in use, this would measure the CPU.
-  const gpuSpeed = loaded.gpu ? await measure().catch(() => failed) : failed;
+  let gpuSpeed = failed;
+  try {
+    await load(model, "gpu");
+    // Without the GPU in use, this would measure the CPU.
+    if (loaded.gpu) gpuSpeed = await measure();
+  } catch (e) {
+    // WebGPU failing (out of memory, for example) leaves the CPU.
+    console.warn("WebGPU failed:", e);
+  }
   await load(model, "cpu");
   const cpuSpeed = await measure().catch(() => failed);
   const faster = gpuSpeed.seconds < cpuSpeed.seconds ? "gpu" : "cpu";
@@ -344,7 +467,7 @@ function loadFailed(model, e) {
  */
 async function remeasure(id) {
   const current = await startJob(id, "measure");
-  const next = loading.then(async () => {
+  const next = enqueue(async () => {
     const model = await selectedModel();
     if (!model || !(await isDownloaded(model))) {
       setStatus({ state: "no_model" });
@@ -359,7 +482,6 @@ async function remeasure(id) {
       throw loadFailed(model, e);
     }
   });
-  loading = next.catch(() => {});
   try {
     await next;
     post({ type: "done", id, tokens: 0, cut: 0, stopped: false, cancelled: false });
@@ -392,21 +514,29 @@ async function startJob(id, kind) {
   return current;
 }
 
-/** Generates the translation for `text` (a prompt), streaming pieces to `onText` if given. */
+/**
+ * Generates the translation for `text` (a prompt), streaming pieces to `onText` if given. A job
+ * whose model was unloaded meanwhile ends as cancelled (a page batch is then sent again).
+ */
 async function generate(current, text, maxTokens, onText = null) {
+  if (current.instance !== loaded) {
+    current.controller.abort();
+    throw new DOMException("cancelled", "AbortError");
+  }
+  const instance = current.instance;
   const options = { prompt: text, max_tokens: maxTokens, temperature: 0, stop: [STOP], abortSignal: current.controller.signal };
   if (!onText) {
     // Not streamed: each poll for a result runs one step of llama.cpp's loop, and a stream polls
     // once per token, so batches streamed side by side would take as many steps as one after
     // another. Unstreamed, their requests wait while each step decodes a token for all of them.
-    const result = await loaded.wllama.createCompletion(options);
+    const result = await complete(instance, options);
     const choice = result.choices?.[0];
     return { output: choice?.text ?? "", tokens: result.timings?.predicted_n ?? 0, cut: choice?.finish_reason === "length" };
   }
   let output = "";
   let tokens = 0;
   let finish = null;
-  await loaded.wllama.createCompletion({
+  await complete(instance, {
     ...options,
     stream: true,
     onData: (chunk) => {
@@ -430,6 +560,7 @@ async function run(id, kind, work) {
   const totals = { tokens: 0, cut: 0 };
   try {
     await ensureLoaded();
+    current.instance = loaded;
     if (current.controller.signal.aborted) throw new DOMException("cancelled", "AbortError");
     await work(current, totals);
     post({ type: "done", id, tokens: totals.tokens, cut: totals.cut, stopped: totals.cut > 0, cancelled: false });
@@ -471,15 +602,33 @@ function translateSegments(request) {
     const target = resolveTarget(request.target, request.segments.join("\n"));
     post({ type: "started", id: request.id, target });
     const history = new History(HISTORY_TOKENS);
-    for (const [index, segment] of request.segments.entries()) {
-      const text = prompt({ text: segment, target, source: request.source, style: request.style, history: history.pairs });
-      const result = await generate(current, text, maxTokensFor(segment));
+    const piece = async (text) => {
+      const result = await generate(current, prompt({ text, target, source: request.source, style: request.style, history: history.pairs }), maxTokensFor(text));
       totals.tokens += result.tokens;
       if (result.cut) totals.cut++;
       const translation = result.output.trim();
+      history.add(text, translation);
+      return { translation, tokens: result.tokens };
+    };
+    for (const [index, segment] of request.segments.entries()) {
+      let translation = "";
+      let tokens = 0;
+      if (estimateTokens(segment) <= CHUNK_TOKENS) {
+        ({ translation, tokens } = await piece(segment));
+      } else {
+        // A long run (a paragraph with line breaks, an article in one element) goes in chunks,
+        // as in the app, so that each fits a slot's context.
+        const { leading, chunks } = split(segment, CHUNK_TOKENS);
+        translation = leading;
+        for (const chunk of chunks) {
+          const result = await piece(chunk.text);
+          translation += result.translation + chunk.separator;
+          tokens += result.tokens;
+        }
+        translation = translation.trim();
+      }
       // The tokens let the background tell the page's speed over its batches running together.
-      post({ type: "segment", id: request.id, index, text: translation, tokens: result.tokens });
-      history.add(segment, translation);
+      post({ type: "segment", id: request.id, index, text: translation, tokens });
     }
   });
 }
@@ -527,16 +676,20 @@ port.onMessage.addListener(async (message) => {
   switch (message.type) {
     case "configure":
       settings = { model: message.model ?? "", device: message.device ?? "auto", threads: Number(message.threads) || 0 };
-      // The next translation loads what is chosen now.
-      if (
-        loaded &&
-        (loaded.model.id !== (await selectedModel())?.id ||
-          (settings.device !== "auto" && settings.device !== loaded.device) ||
-          (!loaded.gpu && settings.threads !== loaded.requestedThreads))
-      ) {
-        await unload();
-      }
       sendStatus();
+      // The next translation loads what is chosen now. The unload waits for a load or measurement
+      // in progress, and ends the translations that use the model.
+      enqueue(async () => {
+        if (
+          loaded &&
+          (loaded.model.id !== (await selectedModel())?.id ||
+            (settings.device !== "auto" && settings.device !== loaded.device) ||
+            (!loaded.gpu && settings.threads !== loaded.requestedThreads))
+        ) {
+          await unload();
+        }
+        await setIdleStatus();
+      });
       return;
     case "status":
       sendStatus();
@@ -573,10 +726,11 @@ port.onMessage.addListener(async (message) => {
 // Chrome stops an idle service worker, which would drop this port; it is kept alive by messages.
 // The background closes this document after a while without work.
 setInterval(() => post({ type: "keepalive" }), 20_000);
+// Without the background (its service worker stopped anyway), nothing would release the model.
+port.onDisconnect.addListener(() => {
+  unload().finally(() => window.close());
+});
 
 // Ask for the persistent storage that keeps the models when space runs short.
 navigator.storage.persist?.().catch(() => {});
-(async () => {
-  const model = await selectedModel();
-  setStatus(model ? { state: "released", model: model.label } : { state: "no_model" });
-})();
+enqueue(setIdleStatus);

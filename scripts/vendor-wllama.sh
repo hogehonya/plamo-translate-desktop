@@ -21,7 +21,7 @@ cp "$src/llama.cpp/LICENSE" "$out/LICENSE-llama.cpp.txt"
 
 wllama_commit=$(git -C "$src" rev-parse HEAD)
 llama_commit=$(git -C "$src/llama.cpp" rev-parse HEAD)
-version=$(node -p "require('./$src/package.json').version")
+version=$(node -p 'require(process.argv[1]).version' "$(cd "$src" && pwd)/package.json")
 patches=$(cd "$(dirname "$0")/../patches/wllama" && ls *.patch | sed 's/^/- /')
 
 cat > "$out/README.md" <<EOF
