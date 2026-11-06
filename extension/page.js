@@ -50,6 +50,15 @@
   let speed = null;
   /** Stopped by the user, with paragraphs left that Resume would translate. */
   let stopped = false;
+  /**
+   * Runs found but not sent yet: hidden ones (collapsed sections, menus, text for screen
+   * readers), and with the panel's setting those far from the view. They are sent when they
+   * show or come near (see `recheck`).
+   */
+  let deferred = [];
+  /** The panel's setting: only the runs near the view are translated, the rest when scrolled to. */
+  let nearbyOnly = false;
+  let recheckTimer = null;
 
   // ---- Collecting runs ----
 
@@ -346,11 +355,57 @@
   /** Forgets the paragraphs waiting, which Resume can send again. */
   function stopLocally() {
     for (const item of pending.values()) for (const node of item.run) handled.delete(node);
-    stopped = pending.size > 0;
+    stopped = pending.size > 0 || deferred.length > 0;
     pending.clear();
+    deferred = [];
     setWorking([]);
     observer?.disconnect();
     observer = null;
+    clearInterval(recheckTimer);
+    recheckTimer = null;
+  }
+
+  // ---- What is sent: shown, and with the setting near the view ----
+
+  /**
+   * Whether the run shows on the page: its nodes not hidden by their styles (display,
+   * visibility, opacity), and not shrunk to nothing (text for screen readers only).
+   */
+  function shown(run) {
+    const options = { checkOpacity: true, checkVisibilityCSS: true };
+    const styled = run.some((node) => {
+      const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+      return el?.checkVisibility ? el.checkVisibility(options) : true;
+    });
+    if (!styled) return false;
+    const rect = runRect(run);
+    return !!rect && rect.width > 2 && rect.height > 2;
+  }
+
+  /** Whether the run is within a screen's height of the view. */
+  function near(run) {
+    const rect = runRect(run);
+    const height = window.innerHeight;
+    return !!rect && rect.bottom > -height && rect.top < 2 * height;
+  }
+
+  const wanted = (run) => shown(run) && (!nearbyOnly || near(run));
+
+  /** Sends the runs wanted now, keeping the others for later. */
+  function offer(runs, start = false) {
+    const now = [];
+    for (const run of runs) (wanted(run) ? now : deferred).push(run);
+    send(now, start);
+  }
+
+  /** Sends the deferred runs that show or came near since. */
+  function recheck() {
+    if (!deferred.length || !observer) return;
+    deferred = deferred.filter((run) => run[0].isConnected && !run.some((node) => handled.has(node)));
+    const now = deferred.filter(wanted);
+    if (!now.length) return;
+    deferred = deferred.filter((run) => !now.includes(run));
+    send(now);
   }
 
   // ---- The runs being translated ----
@@ -448,9 +503,15 @@
   window.addEventListener("resize", redrawMarks, { passive: true });
   // Turned on or off in the panel, also while the page translates.
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !changes.pageMarks) return;
-    showMarks = changes.pageMarks.newValue !== false;
-    drawMarks();
+    if (area !== "local") return;
+    if (changes.pageMarks) {
+      showMarks = changes.pageMarks.newValue !== false;
+      drawMarks();
+    }
+    if (changes.pageNearby) {
+      nearbyOnly = changes.pageNearby.newValue === true;
+      recheck();
+    }
   });
 
   /** The element whose position stands for `run`. */
@@ -458,12 +519,15 @@
     return run[0].nodeType === Node.ELEMENT_NODE ? run[0] : run[0].parentElement;
   }
 
-  // When scrolling stops, the paragraphs in view move to the front of the queue.
+  // When scrolling stops, the paragraphs in view move to the front of the queue, and those that
+  // came near are sent.
   let scrollTimer = null;
   function onScroll() {
-    if (!pending.size || !port) return;
+    if (!pending.size && !deferred.length) return;
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(() => {
+      recheck();
+      if (!pending.size || !port) return;
       const height = window.innerHeight;
       const visible = [...pending.entries()]
         .map(([sid, item]) => ({ sid, rect: anchor(item.run)?.getBoundingClientRect() }))
@@ -484,6 +548,7 @@
     }
     applied.length = 0;
     handled = new WeakSet();
+    deferred = [];
     total = done = 0;
     render(t("pageRestored"));
   }
@@ -494,13 +559,14 @@
     stopped = false;
     speed = null;
     const [settings, messages] = await Promise.all([
-      chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", pageMarks: true }),
+      chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", pageMarks: true, pageNearby: false }),
       // The display language's messages, for t() in i18n.js (injected with this file).
       chrome.runtime.sendMessage({ type: "ui_messages" }).catch(() => null),
     ]);
     uiMessages = messages;
     mode = settings.pageMode;
     showMarks = settings.pageMarks !== false;
+    nearbyOnly = settings.pageNearby === true;
     style = settings.style;
     target = settings.target;
     if (target === "auto") {
@@ -510,10 +576,11 @@
       target = kana > sample.length * 0.05 ? "en" : "ja";
     }
     if (target !== "ja") style = "";
-    send(collect(document.body), true);
+    deferred = [];
+    offer(collect(document.body), true);
     // Also when nothing new was sent (the page is translated already), so that the box shows
     // again, even if it was closed: the request was not ignored.
-    render(total ? undefined : t("pageNothing"));
+    render(total || deferred.length ? undefined : t("pageNothing"));
     // Paragraphs added later (infinite scrolling, expanding sections).
     observer?.disconnect();
     let timer = null;
@@ -532,10 +599,13 @@
         added.clear();
         // Overlapping roots find a run twice; send() drops those already sent.
         const runs = roots.flatMap((root) => (inline(root) ? collect(root.parentElement ?? root) : collect(root)));
-        send(runs);
+        offer(runs.filter((run) => !deferred.some((d) => d[0] === run[0])));
       }, 500);
     });
     observer.observe(document.body, { childList: true, subtree: true });
+    // Sections that open, or tabs that switch, show runs without adding nodes.
+    clearInterval(recheckTimer);
+    recheckTimer = setInterval(recheck, 2000);
   }
 
   window.__plamoPage = { start };

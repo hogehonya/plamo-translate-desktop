@@ -543,6 +543,9 @@ or, from v0.4.0, on its own with an in-browser engine (see "In-browser engine" b
   - The translation is parsed inertly (`DOMParser`) and rebuilt from text nodes and clones of the run's own elements, looked up by index,
     so links keep their targets and nothing the model writes can add attributes, elements, or scripts. Unknown or repeated indices keep only their text.
   - The runs in view go first; when scrolling stops, the pending runs in view move to the front of the queue (`prioritize`).
+  - Runs that do not show (hidden by `display`, `visibility` or `opacity`, as `checkVisibility` tells, or shrunk to a pixel) are
+    kept back, and with the panel's `pageNearby` setting those more than a screen from the view too; they are sent when they show
+    or come near, checked when scrolling stops and every two seconds (sections that open add no nodes).
   - The background tells the page which runs the host is on (`working`: the first not done of each batch running, since a batch
     goes in order), and page.js frames them in a layer of its own above the page (a shadow root with fixed boxes over each run's
     range, redrawn on scrolling and every half second), leaving the page untouched. The panel's setting `pageMarks` turns it off.
@@ -595,6 +598,10 @@ or, from v0.4.0, on its own with an in-browser engine (see "In-browser engine" b
       (wllama's default), every step attends over all the sequences, and two concurrent translations ran five times slower than one.
     - Segments are generated without streaming. Each poll for a result runs one step of llama.cpp's loop, and a stream polls once
       per token, so streamed batches took as many steps side by side as one after another.
+    - The batches run in rounds: the next paragraphs (four batches' worth) are dealt among them in turn, the first taking 1, 5, 9…,
+      and the next round starts when the last of this one ends. The paragraphs translated at once are next to each other, so the page
+      fills from the top instead of in four places; each batch's history is the paragraphs four before. Measured as below: 47 s
+      (consecutive batches side by side took 49 s, one at a time 70 s). The panel's `parallelPages` setting turns it off.
     - A panel translation stops all the batches (they are sent again after it), so it runs alone at full speed.
       `cancel` takes the job's `id`; the app's host ignores it.
     - Measured on a Radeon RX 9070 XT with 80 paragraphs, from the model loaded to the last: 2B 66 s one batch at a time, 46 s

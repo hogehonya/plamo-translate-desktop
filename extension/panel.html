@@ -43,6 +43,12 @@
       <label id="threadsRow" hidden><span data-i18n="threads"></span><select id="threads"></select></label>
       <label><span data-i18n="pageMode"></span><select id="pageMode"></select></label>
       <label class="check"><input type="checkbox" id="pageMarks" /><span data-i18n="pageMarks"></span></label>
+      <label class="check"><input type="checkbox" id="pageNearby" /><span data-i18n="pageNearby"></span></label>
+      <!-- The in-browser engine's batches side by side: faster, with less context. -->
+      <div id="parallelRow" hidden>
+        <label class="check"><input type="checkbox" id="parallelPages" /><span data-i18n="parallelPages"></span></label>
+        <p class="hint check-hint" data-i18n="parallelPagesHint"></p>
+      </div>
       <label><span data-i18n="uiLanguage"></span><select id="uiLanguage"></select></label>
       <!-- In the browser, a link to setting up the app, which the larger models need. -->
       <p class="hint"><span id="settingsHint"></span> <a id="appGuide" href="#" hidden data-i18n="appGuide"></a></p>

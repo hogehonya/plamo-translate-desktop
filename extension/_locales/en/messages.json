@@ -634,5 +634,17 @@
   "pageMarks": {
     "message": "Frame the paragraphs being translated",
     "description": "Setting: a pulsing frame on the page over the paragraphs the engine is translating"
+  },
+  "pageNearby": {
+    "message": "Translate only near the view (the rest as you scroll)",
+    "description": "Setting: page translation sends only the paragraphs within a screen of the view, and the others when scrolled to"
+  },
+  "parallelPages": {
+    "message": "Translate pages in parallel",
+    "description": "Setting (in-browser engine): page batches side by side"
+  },
+  "parallelPagesHint": {
+    "message": "Faster, but each paragraph is translated with less of the text before it, so the wording may be a little off.",
+    "description": "Explanation under the parallel setting"
   }
 }

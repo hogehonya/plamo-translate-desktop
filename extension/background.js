@@ -351,33 +351,70 @@ function endDownloads(message) {
   downloads.clear();
 }
 
-/** How many page batches the host runs at once: one until the in-browser engine tells. */
-const batchSlots = () => (host?.kind === "browser" && status.engine === "browser" && status.slots > 1 ? status.slots : 1);
+/** Whether page batches run side by side on the in-browser engine: the panel's setting. */
+let parallelPages = true;
+chrome.storage.local
+  .get({ parallelPages: true })
+  .then((saved) => (parallelPages = saved.parallelPages !== false))
+  .catch(() => {});
 
-/** Starts page batches while the host has room for them and no panel translation (or measurement) runs. */
+/**
+ * How many page batches the host runs at once: one until the in-browser engine tells, and one
+ * with the panel's setting off.
+ */
+const batchSlots = () =>
+  parallelPages && host?.kind === "browser" && status.engine === "browser" && status.slots > 1 ? status.slots : 1;
+
+/** Takes the next paragraphs of `page`, in order, up to these limits (at least one). */
+function take(page, maxSegments, maxChars) {
+  const items = [];
+  let chars = 0;
+  while (page.pending.length && items.length < maxSegments && (chars < maxChars || !items.length)) {
+    const item = page.pending.shift();
+    chars += item.text.length;
+    items.push(item);
+  }
+  return items;
+}
+
+function startBatch(tabId, page, items) {
+  const job = { id: nextId++, kind: "page", tabId, items, cancelled: false, counted: 0 };
+  jobs.set(job.id, job);
+  active.add(job);
+  sendHost({
+    type: "translate_segments",
+    id: job.id,
+    segments: items.map((item) => item.text),
+    target: page.target,
+    style: page.style || undefined,
+  });
+}
+
+/**
+ * Starts page batches while the host has room for them and no panel translation (or measurement)
+ * runs. One at a time, a batch is the next paragraphs, each with the ones before as history.
+ * Side by side, a page's batches run in rounds: the next paragraphs are dealt among them in turn
+ * (the first takes 1, 5, 9…, the second 2, 6, 10…), so that those translated at once are next to
+ * each other and the page fills from the top, and the next round waits for the last batch of this
+ * one. A batch's history is then the paragraphs a few before, not the one just before.
+ */
 function schedule() {
   if ([...active].some((job) => job.kind !== "page")) return;
-  while (active.size < batchSlots()) {
+  const slots = batchSlots();
+  while (active.size < slots) {
     const entry = [...pages].find(([, page]) => page.pending.length);
     if (!entry) return;
     const [tabId, page] = entry;
-    const items = [];
-    let chars = 0;
-    while (page.pending.length && items.length < BATCH_SEGMENTS && (chars < BATCH_CHARS || !items.length)) {
-      const item = page.pending.shift();
-      chars += item.text.length;
-      items.push(item);
+    if (slots === 1) {
+      startBatch(tabId, page, take(page, BATCH_SEGMENTS, BATCH_CHARS));
+      continue;
     }
-    const job = { id: nextId++, kind: "page", tabId, items, cancelled: false, counted: 0 };
-    jobs.set(job.id, job);
-    active.add(job);
-    sendHost({
-      type: "translate_segments",
-      id: job.id,
-      segments: items.map((item) => item.text),
-      target: page.target,
-      style: page.style || undefined,
-    });
+    if ([...active].some((job) => job.kind === "page" && job.tabId === tabId)) return;
+    const round = take(page, slots * BATCH_SEGMENTS, slots * BATCH_CHARS);
+    const batches = Array.from({ length: Math.min(slots, round.length) }, () => []);
+    round.forEach((item, i) => batches[i % batches.length].push(item));
+    for (const items of batches) startBatch(tabId, page, items);
+    return;
   }
 }
 
@@ -617,6 +654,8 @@ chrome.runtime.onConnect.addListener((port) => {
 // The display language, read again when the panel changes it.
 let languageReady = loadUiLanguage();
 chrome.storage.local.onChanged.addListener((changes) => {
+  // From the next batch on.
+  if (changes.parallelPages) parallelPages = changes.parallelPages.newValue !== false;
   if (!changes.uiLanguage) return;
   languageReady = loadUiLanguage().then(() => {
     for (const { id, message } of MENUS) chrome.contextMenus.update(id, { title: t(message) }).catch(() => {});

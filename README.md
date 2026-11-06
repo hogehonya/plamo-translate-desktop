@@ -96,6 +96,8 @@ Install the app first (see [Download](#download)), then:
    The browser lets the panel's button into a tab only after the toolbar button or the right-click menu was used on it, until the tab
    goes to another site; on other tabs the panel offers to allow the extension on all sites.
    Paragraphs are translated in place, keeping links and formatting: those in view first, and when you scroll, the ones you scrolled to.
+   Hidden ones (collapsed sections, menus) wait until they show. **Settings** in the panel can limit it to the paragraphs near the view,
+   translating the rest as you scroll to them.
    A box at the bottom right shows the progress and can stop, resume, or restore the page, and a frame marks the paragraphs being
    translated (**Settings** in the panel can turn it off). Translating another page stops this one,
    which can be resumed later.
@@ -139,6 +141,8 @@ the engine starts (after **Release**, or 5 minutes without use).
   With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT,
   and 18 on the CPU of a Ryzen 9 9950X: slower than the app, but usable. Reading long texts is slower on the CPU.
   With **CPU** chosen as the device, the number of threads can be set below it.
+  Page translation runs four batches of paragraphs at once, dealt in turn so that the page fills from the top; **Translate pages in
+  parallel** under **Settings** turns it off, for wording that follows the paragraphs before more closely but slower translation.
   The extension asks for the high-performance GPU, but Chrome and Edge use the GPU Windows assigns them: on a PC whose display
   runs on the integrated GPU, give the browser the discrete GPU under Windows' Settings → System → Display → Graphics.
 - As with the app, the model is released after 5 minutes without use, or with **Release**.

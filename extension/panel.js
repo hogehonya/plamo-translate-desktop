@@ -62,7 +62,9 @@ $("target").addEventListener("change", () => {
 });
 $("style").addEventListener("change", () => chrome.storage.local.set({ style: $("style").value }));
 $("pageMode").addEventListener("change", () => chrome.storage.local.set({ pageMode: $("pageMode").value }));
-$("pageMarks").addEventListener("change", () => chrome.storage.local.set({ pageMarks: $("pageMarks").checked }));
+for (const id of ["pageMarks", "pageNearby", "parallelPages"]) {
+  $(id).addEventListener("change", () => chrome.storage.local.set({ [id]: $(id).checked }));
+}
 $("uiLanguage").addEventListener("change", () => chrome.storage.local.set({ uiLanguage: $("uiLanguage").value }));
 $("engine").addEventListener("change", () => {
   shownOptions = null;
@@ -232,7 +234,7 @@ $("copy").addEventListener("click", async () => {
 // is first contacted.
 const ready = Promise.all([
   loadUiLanguage(),
-  chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", pageMarks: true, engine: "auto", licenseAccepted: false, ...choices }),
+  chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", pageMarks: true, pageNearby: false, parallelPages: true, engine: "auto", licenseAccepted: false, ...choices }),
 ]).then(([uiLanguage, saved]) => {
   applyLanguage();
   $("uiLanguage").value = uiLanguage;
@@ -240,6 +242,8 @@ const ready = Promise.all([
   $("style").value = saved.style;
   $("pageMode").value = saved.pageMode;
   $("pageMarks").checked = saved.pageMarks;
+  $("pageNearby").checked = saved.pageNearby;
+  $("parallelPages").checked = saved.parallelPages;
   $("engine").value = saved.engine;
   updateStyleVisibility();
   for (const key of Object.keys(choices)) Object.assign(choices[key], saved[key]);
@@ -572,6 +576,8 @@ function renderBrowserModels() {
 /** Texts that depend on the engine in use. */
 function renderEngineTexts() {
   $("settingsHint").textContent = t(engine === "browser" ? "settingsHintBrowser" : "settingsHint");
+  // The app's host translates one batch at a time anyway.
+  $("parallelRow").hidden = engine !== "browser";
   $("appGuide").hidden = engine !== "browser";
   $("appGuide").href = t("appGuideUrl");
   $("release").title = t(engine === "browser" ? "releaseTitleBrowser" : "releaseTitle");
