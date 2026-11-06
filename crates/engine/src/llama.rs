@@ -406,6 +406,9 @@ impl TranslationBackend for Session<'_> {
         self.ctx.clear_kv_cache();
         let prompt_start = Instant::now();
         self.decode_prompt(&tokens)?;
+        // On a GPU, decoding returns before the work is done; without waiting, the prompt's
+        // time would count as the first generated token's.
+        self.ctx.synchronize();
         let prompt_duration = prompt_start.elapsed();
 
         let vocab = self.model.model.vocab();
