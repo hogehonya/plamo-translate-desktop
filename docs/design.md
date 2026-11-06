@@ -459,6 +459,8 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
   - Windows: a portable zip with the exe, the DLLs and backend modules, the Visual C++ runtime, the READMEs, the licenses,
     and `THIRD-PARTY-NOTICES.txt`.
   - Linux: a tar.gz with the same contents (no Visual C++ runtime), a desktop entry, and its icon.
+  - macOS (Apple Silicon, from v0.4.0): `scripts/package-macos.sh` on a macos-15 runner, a disk image with the app bundle (llama.cpp linked
+    statically with Metal, the shaders embedded; the host, and the extension in `Contents/Resources`), signed ad hoc and not notarized.
   - The browser extension alone (from v0.4.0, for its in-browser engine): a zip whose folder is the extension itself, as Load unpacked
     takes it (common for extensions outside the stores), with the licenses and the in-browser engine's notices (`scripts/notices.sh extension`);
     the README's section on it is online. The job checks that the manifest's version is the workspace's.

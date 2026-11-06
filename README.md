@@ -42,7 +42,7 @@ PLaMo is a trademark of Preferred Networks, Inc.
 
 ## Download
 
-Windows (x86_64) and Linux (x86_64) packages are on the [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page,
+Windows (x86_64), Linux (x86_64) and macOS (Apple Silicon) packages are on the [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page,
 with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build from source (below).
 
 - **Windows** (10 or later): unzip and run `plamo-translate-desktop.exe`. Keep the DLLs next to it:
@@ -66,10 +66,14 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
       > ~/.local/share/applications/plamo-translate-desktop.desktop
     cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
     ```
+- **macOS** (13.3 or later, Apple Silicon): open the disk image (`-macos-arm64.dmg`) and drag the app into Applications.
+  Translation uses the GPU through Metal. The app is not notarized, so macOS refuses to open the downloaded copy at first:
+  run `xattr -dr com.apple.quarantine "/Applications/PLaMo Translate Desktop.app"` in Terminal, or try to open it once and
+  choose **Open Anyway** under System Settings → Privacy & Security.
 - **Browser extension only** (`-browser-extension` zip, Chrome or Edge 137 or later): the extension without the app,
   which translates with the model running in the browser. The unzipped folder is the extension; see [Without the app](#without-the-app).
 
-On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
+On Windows and Linux, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 On a PC with an integrated GPU and no discrete one, the first model load measures whether the CPU or the integrated GPU translates faster
 (integrated GPUs range from much slower to much faster), and Automatic uses the faster one.
 **Measure and choose** next to the device in Settings measures all of them again, for example after a hardware change.

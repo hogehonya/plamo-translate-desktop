@@ -41,7 +41,7 @@ PLaMo は株式会社 Preferred Networks の商標です。
 
 ## ダウンロード
 
-Windows（x86_64）版と Linux（x86_64）版は [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) からダウンロードできます。
+Windows（x86_64）版、Linux（x86_64）版、macOS（Apple Silicon）版は [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) からダウンロードできます。
 SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変更を試すときは、ソースからビルドしてください（後述）。
 
 - **Windows**（10 以降）: 展開して `plamo-translate-desktop.exe` を実行します。同梱の DLL は exe と同じフォルダに置いたままにしてください。
@@ -66,10 +66,14 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
       > ~/.local/share/applications/plamo-translate-desktop.desktop
     cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
     ```
+- **macOS**（13.3 以降、Apple Silicon）: ディスクイメージ（`-macos-arm64.dmg`）を開き、アプリを「アプリケーション」フォルダにドラッグします。
+  翻訳には Metal で GPU を使います。アプリは公証を受けていないため、ダウンロードしたものは最初は開けません。
+  ターミナルで `xattr -dr com.apple.quarantine "/Applications/PLaMo Translate Desktop.app"` を実行するか、一度開こうとしたあとで
+  システム設定の「プライバシーとセキュリティ」で **このまま開く** を選んでください。
 - **ブラウザ拡張のみ**（`-browser-extension` の zip、Chrome か Edge の 137 以降）: アプリを含まない拡張機能だけのものです。
   ブラウザ内でモデルを動かして翻訳します。展開したフォルダがそのまま拡張機能です。[アプリなしで使う](#アプリなしで使う) を参照してください。
 
-どちらも、Vulkan で使える単体 GPU があればそれで翻訳し、無ければ CPU が対応する最速の方式（AVX2 または AVX-512）で翻訳します。
+Windows と Linux では、Vulkan で使える単体 GPU があればそれで翻訳し、無ければ CPU が対応する最速の方式（AVX2 または AVX-512）で翻訳します。
 単体 GPU が無く内蔵 GPU がある PC では、最初にモデルを読み込むときに CPU と内蔵 GPU のどちらが速いかを測り、「自動」では速いほうを使います
 （内蔵 GPU は CPU よりずっと遅いものから、ずっと速いものまであるためです）。
 設定のデバイス欄の **速さを測って選ぶ** で、ハードウェアを変えたときなどに全デバイスを測り直せます。

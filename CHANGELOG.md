@@ -6,7 +6,7 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
 
 ### Added
 
-- macOS (Apple Silicon) support. `scripts/package-macos.sh` builds the package: the app in a disk image, for macOS 13.3 or later. llama.cpp runs on the GPU through Metal. The Release workflow does not build it yet.
+- macOS (Apple Silicon) support. `scripts/package-macos.sh` builds the package: the app in a disk image, for macOS 13.3 or later. llama.cpp runs on the GPU through Metal. The Releases page has it as `…-macos-arm64.dmg`. It is not notarized: the README says how to open it.
   - **Connect** registers the browser host with Chrome, Chromium, Edge, and Brave in `~/Library/Application Support`. It used to write to `~/.config`, where only their Linux versions look.
 - The browser extension translates on its own too, with the model running in the browser: [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to WebAssembly) on the CPU or the GPU (WebGPU). The app is not needed for it. See "Without the app" in the README.
   - **Engine** under Settings in the panel: Automatic (the app when it is connected, otherwise the browser), PLaMo Translate Desktop, or In the browser.
