@@ -2,7 +2,7 @@
 # Writes THIRD-PARTY-NOTICES.txt for a package: the licenses of the Rust crates (cargo-about,
 # configured by about.toml and about.hbs) followed by the components cargo-about cannot see.
 #
-# usage: scripts/notices.sh windows|linux|extension OUTPUT
+# usage: scripts/notices.sh windows|linux|macos|extension OUTPUT
 #   extension: the browser extension alone, which has no Rust code; its notices are the
 #   in-browser engine's.
 set -eu
@@ -20,8 +20,13 @@ if [ "$platform" = extension ]; then
     } > "$output"
     exit 0
 fi
+# about.toml lists the Windows and Linux targets; the macOS package has its own crate set.
+set --
+if [ "$platform" = macos ]; then
+    set -- --target aarch64-apple-darwin
+fi
 {
-    cargo about generate --locked about.hbs
+    cargo about generate --locked "$@" about.hbs
     echo "Other components"
     echo "================"
     echo

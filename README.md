@@ -80,9 +80,11 @@ The packages include an extension for Chrome and Edge (`browser-extension/`) tha
 Install the app first (see [Download](#download)), then:
 
 1. In the app, open Settings (the gear in the status bar) and choose **Connect** under Browser extension.
-   This registers the bundled `plamo-translate-host` with Chrome and Edge (on Linux also Chromium and Brave).
+   This registers the bundled `plamo-translate-host` with Chrome and Edge (on Linux and macOS also Chromium and Brave).
 2. Open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked**,
    and select the `browser-extension` folder (**Open extension folder** in the same Settings section).
+   On macOS the folder is inside the app, which the dialog does not open: press `Cmd+Shift+G` in it and enter
+   `/Applications/PLaMo Translate Desktop.app/Contents/Resources/browser-extension`.
 3. Select text on a page, right-click, and choose **Translate with PLaMo**: the side panel shows the translation as it streams in.
    The toolbar button opens the panel to type or paste text.
 4. To translate a whole page, right-click it and choose **Translate this page with PLaMo** (or **Translate this page** in the panel).
@@ -169,6 +171,16 @@ cargo build -p plamo-translate-desktop --release --features engine/vulkan,engine
 With `dynamic-backends`, copy the `ggml-*.dll` modules from `target/release/build/llama-cpp-sys-2-*/out/backends` next to the executable,
 or run it with `cargo run`, which finds them in the build directory.
 
+macOS (Apple Silicon) needs the Xcode Command Line Tools and CMake (`brew install cmake`).
+There llama.cpp runs on the GPU through Metal, also in the development build above.
+`scripts/package-macos.sh` builds the package: an app bundle for macOS 13.3 or later in a disk image.
+It needs `cargo-about` (`brew install cargo-about`) for the third-party notices.
+The bundle is signed ad hoc, which Gatekeeper accepts only on the Mac that built it, unless `CODESIGN_IDENTITY` names a Developer ID and the app is then notarized.
+
+```sh
+scripts/package-macos.sh
+```
+
 ### Development
 
 - `crates/pfml`: PFML3 prompt builder (the PLaMo prompt format).
@@ -194,11 +206,13 @@ Models (in `models/`), the cached model list (`catalog.json`), and a small log (
 
 - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
 - Linux: `~/.local/share/plamo-translate-desktop` (`$XDG_DATA_HOME`)
+- macOS: `~/Library/Application Support/plamo-translate-desktop`
 
 The log records start-up, detected devices, model loads, downloads, deletions, settings changes, and where long texts were retried or cut, but never translated text.
 A log larger than 1 MiB is moved to `app.log.1` at start-up.
 
-Settings are in `settings.json`: `%APPDATA%\plamo-translate-desktop\config` on Windows, and `~/.config/plamo-translate-desktop` (`$XDG_CONFIG_HOME`) on Linux.
+Settings are in `settings.json`: `%APPDATA%\plamo-translate-desktop\config` on Windows, `~/.config/plamo-translate-desktop` (`$XDG_CONFIG_HOME`) on Linux,
+and the data folder above on macOS.
 
 ## License
 

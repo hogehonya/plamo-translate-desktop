@@ -80,9 +80,11 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
 先にアプリを入れてから（[ダウンロード](#ダウンロード)を参照）、次の手順で連携します。
 
 1. アプリのステータスバーの歯車から「設定」を開き、「ブラウザ拡張」の **連携する** を押します。
-   同梱の `plamo-translate-host` を Chrome と Edge に登録します（Linux では Chromium と Brave にも登録します）。
+   同梱の `plamo-translate-host` を Chrome と Edge に登録します（Linux と macOS では Chromium と Brave にも登録します）。
 2. `chrome://extensions`（Edge なら `edge://extensions`）を開いてデベロッパー モードをオンにし、**パッケージ化されていない拡張機能を読み込む** で
    `browser-extension` フォルダを選びます（同じ設定の **拡張機能のフォルダを開く** で開けます）。
+   macOS ではフォルダがアプリの中にあり、ダイアログからは開けません。ダイアログで `Cmd+Shift+G` を押し、
+   `/Applications/PLaMo Translate Desktop.app/Contents/Resources/browser-extension` と入力してください。
 3. ページの文章を選択して右クリックし、**PLaMo で翻訳** を選ぶと、サイドパネルに訳文が流れるように表示されます。
    ツールバーのボタンでパネルを開き、文章を入力したり貼り付けたりして訳すこともできます。
 4. ページ全体を訳すときは、ページを右クリックして **このページを PLaMo で翻訳** を選びます（パネルの **このページを翻訳** でも同じです）。
@@ -166,6 +168,16 @@ cargo build -p plamo-translate-desktop --release --features engine/vulkan,engine
 
 `dynamic-backends` を有効にした場合は、`target/release/build/llama-cpp-sys-2-*/out/backends` にある `ggml-*.dll` を実行ファイルと同じフォルダに置くか、`cargo run` で起動してください。`cargo run` ならビルドフォルダから見つけます。
 
+macOS（Apple Silicon）では、Xcode Command Line Tools と CMake（`brew install cmake`）が必要です。
+macOS では、上の開発用ビルドでも llama.cpp が Metal で GPU を使います。
+`scripts/package-macos.sh` で配布物（macOS 13.3 以降用のアプリバンドルを入れたディスクイメージ）を作れます。
+サードパーティーのライセンス表示を作るため、`cargo-about`（`brew install cargo-about`）も必要です。
+バンドルにはアドホック署名をします。Gatekeeper が通すのはビルドした Mac だけなので、ほかの Mac で使うには、`CODESIGN_IDENTITY` に Developer ID を指定して署名し、公証を受けてください。
+
+```sh
+scripts/package-macos.sh
+```
+
 ### 開発
 
 - `crates/pfml`: PFML3（PLaMo のプロンプト形式）のプロンプト構築。
@@ -191,11 +203,12 @@ cargo run -p engine --release --example download -- --list
 
 - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
 - Linux: `~/.local/share/plamo-translate-desktop`（`$XDG_DATA_HOME`）
+- macOS: `~/Library/Application Support/plamo-translate-desktop`
 
 ログには、起動、検出したデバイス、モデルの読み込み、ダウンロード、削除、設定の変更、長い文章のやり直しや打ち切りの位置を記録します。翻訳した文章は記録しません。
 起動時に 1 MiB を超えていたら `app.log.1` に退避します。
 
-設定は `settings.json` に保存します。場所は、Windows では `%APPDATA%\plamo-translate-desktop\config`、Linux では `~/.config/plamo-translate-desktop`（`$XDG_CONFIG_HOME`）です。
+設定は `settings.json` に保存します。場所は、Windows では `%APPDATA%\plamo-translate-desktop\config`、Linux では `~/.config/plamo-translate-desktop`（`$XDG_CONFIG_HOME`）、macOS では上のデータの場所です。
 
 ## ライセンス
 
