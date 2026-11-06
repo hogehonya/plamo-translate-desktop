@@ -139,5 +139,14 @@ ls -l "$dist" "$app/Contents/MacOS"
 target/dist/examples/translate --list-devices
 "$app/Contents/MacOS/plamo-translate-host" --check
 
-hdiutil create -quiet -volname "$app_name" -srcfolder "$dist" -fs HFS+ -format UDZO -ov "$package.dmg"
+# hdiutil fails now and then on CI machines (a busy resource): it is tried again.
+attempt=1
+until hdiutil create -volname "$app_name" -srcfolder "$dist" -fs HFS+ -format UDZO -ov "$package.dmg"; do
+    if [ "$attempt" -ge 3 ]; then
+        echo "hdiutil failed $attempt times" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 10
+done
 shasum -a 256 "$package.dmg"
