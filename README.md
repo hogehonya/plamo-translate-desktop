@@ -18,7 +18,7 @@ locally on your computer. It works offline once a model is downloaded. Written i
   - Each file shows the translation quality PFN publishes, with the difference from the unquantized model.
   - Downloads resume after an interruption and are verified with SHA-256.
   - Newly published files are picked up from Hugging Face without an app update.
-- Runs on the CPU (AVX2 or AVX-512) or on a GPU through Vulkan. Linux source builds can also use ROCm. The device is selectable, and automatic selection picks the discrete GPU.
+- Runs on the CPU (AVX2 or AVX-512) or on a GPU through Vulkan. Linux source builds can also use ROCm. The device is selectable; Automatic uses the fastest one measured on this PC, or else the discrete GPU.
 - English and Japanese UI. It follows the OS language by default and can be changed under Settings (the gear in the status bar). `PLAMO_LANG=ja` or `en` overrides both.
 - Light and dark themes. The default follows the OS; Settings can fix either one.
 - The source and the translation scroll together, and moving the caret in one selects the corresponding paragraph in the other (can be turned off in Settings).
@@ -49,7 +49,7 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
   llama.cpp and its CPU and Vulkan backends are loaded from there, and only from there.
   The Visual C++ runtime is included, so nothing else needs to be installed.
 - **Windows with an Intel NPU** (Core Ultra; experimental): the `-intel-npu` zip is the same app plus OpenVINO's NPU runtime.
-  Choose **NPU** as the device in Settings; Automatic does not choose it. The first translation after a model loads
+  Choose **NPU** as the device in **Models and device** (the model button in the status bar); Automatic does not choose it. The first translation after a model loads
   compiles it for the NPU, which takes a while; the result is cached for later starts. On the NPU the context is 8192 tokens,
   so long texts go in smaller chunks. The NPU driver comes with the PC's drivers or Windows Update.
   The NPU is for using less power and leaving the GPU free rather than for speed: on a Core Ultra 7 356H, 2B translates
@@ -76,11 +76,12 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
 On Windows and Linux, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 On a PC with an integrated GPU and no discrete one, the first model load measures whether the CPU or the integrated GPU translates faster
 (integrated GPUs range from much slower to much faster), and Automatic uses the faster one.
-**Measure and choose** next to the device in Settings measures all of them again, for example after a hardware change.
+**Measure and choose** next to the device in **Models and device** (the model button in the status bar) measures all of them again,
+for example after a hardware change.
 
 ## Browser extension
 
-The packages include an extension for Chrome and Edge (`browser-extension/`) that translates text in the browser with the model selected in the app.
+The packages include an extension for Chrome and Edge 137 or later (`browser-extension/`) that translates text in the browser with the model selected in the app.
 Install the app first (see [Download](#download)), then:
 
 1. In the app, open Settings (the gear in the status bar) and choose **Connect** under Browser extension.
@@ -112,7 +113,7 @@ Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
 ### Without the app
 
 The extension can also translate on its own, with the model running in the browser
-([wllama](https://github.com/ngxson/wllama): llama.cpp compiled to WebAssembly). It needs Chrome or Edge 137 or later.
+([wllama](https://github.com/ngxson/wllama): llama.cpp compiled to WebAssembly).
 
 The browser extension package (`plamo-translate-desktop-X.Y.Z-browser-extension.zip` on the
 [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page) has the extension alone, to try it without installing the app:
@@ -136,6 +137,9 @@ the engine starts (after **Release**, or 5 minutes without use).
   shown as, for example, **Automatic (GPU)** with the speeds measured. **Measure and choose** below it measures them again.
   With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT,
   and 18 on the CPU of a Ryzen 9 9950X: slower than the app, but usable. Reading long texts is slower on the CPU.
+  With **CPU** chosen as the device, the number of threads can be set below it.
+  The extension asks for the high-performance GPU, but Chrome and Edge use the GPU Windows assigns them: on a PC whose display
+  runs on the integrated GPU, give the browser the discrete GPU under Windows' Settings → System → Display → Graphics.
 - As with the app, the model is released after 5 minutes without use, or with **Release**.
 
 ## Building from source
@@ -206,7 +210,8 @@ A GGUF path passed as the first argument (or in `PLAMO_MODEL`) overrides the mod
 
 ### Files and logs
 
-Models (in `models/`), the cached model list (`catalog.json`), and a small log (`app.log`) are kept in:
+Models (in `models/`), the cached model list (`catalog.json`), small logs (`app.log`, and `host.log` for the browser extension's host),
+and the NPU's compiled graphs (`openvino-cache/`) are kept in:
 
 - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
 - Linux: `~/.local/share/plamo-translate-desktop` (`$XDG_DATA_HOME`)
@@ -227,5 +232,7 @@ The source code of this app is licensed under either of
 
 at your option. The PLaMo models are not part of this repository and are covered by the PLaMo Community License.
 
-The packages include third-party software (Rust crates, llama.cpp, Lucide icons, and on Windows the Visual C++ runtime);
-their licenses are in `THIRD-PARTY-NOTICES.txt` in each package, generated by `scripts/notices.sh`.
+The packages include third-party software: the app's Rust crates, llama.cpp, Lucide icons, the browser extension's wllama
+(built with Emscripten and Dawn), on Windows the Visual C++ runtime, and in the Intel NPU package OpenVINO, oneTBB and the OpenCL loader.
+Their licenses are in `THIRD-PARTY-NOTICES.txt` in each package, generated by `scripts/notices.sh`
+(the browser extension package has the in-browser engine's only).

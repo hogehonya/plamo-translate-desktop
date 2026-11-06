@@ -2,6 +2,10 @@
 //!
 //! Each message is UTF-8 JSON preceded by its length as a 32-bit integer in native byte order.
 //! Messages to the browser may be at most 1 MiB; streamed text is sent in small pieces.
+//!
+//! The extension's in-browser engine (`extension/engine.js`) speaks this protocol too, over a
+//! port; the messages and fields it adds (downloads, measuring, `slots`, the tokens of each
+//! segment, and others) are listed at the top of that file.
 
 use std::io::{self, Read, Write};
 

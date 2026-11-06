@@ -10,12 +10,12 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
   - **Connect** registers the browser host with Chrome, Chromium, Edge, and Brave in `~/Library/Application Support`. It used to write to `~/.config`, where only their Linux versions look.
 - The browser extension translates on its own too, with the model running in the browser: [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to WebAssembly) on the CPU or the GPU (WebGPU). The app is not needed for it. See "Without the app" in the README.
   - **Engine** under Settings in the panel: Automatic (the app when it is connected, otherwise the browser), PLaMo Translate Desktop, or In the browser.
-  - The 0.8B and 2B models (Q4_K_M), downloaded into the browser from the panel after accepting the PLaMo Community License. The larger ones do not fit in WebAssembly's memory.
-  - Device: Automatic measures the CPU and the GPU on the first translation and keeps the faster one; the high-performance GPU is used. With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT, and 18 on the CPU of a Ryzen 9 9950X.
+  - The 0.8B and 2B models (Q4_K_M), downloaded into the browser from the panel after accepting the PLaMo Community License (resumed after a network error, and deletable). The larger ones do not fit in WebAssembly's memory.
+  - Device: Automatic measures the CPU and the GPU on the first translation and keeps the faster one; it asks for the high-performance GPU (the README explains Windows' GPU assignment). With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT, and 18 on the CPU of a Ryzen 9 9950X.
   - Released after 5 minutes without use, or with Release, like the app's host.
   - The panel links to the README's steps for setting up the app, which the larger models need.
   - A package with the extension alone (`…-browser-extension.zip`), for trying it without the app.
-  - The status shows the device really used, such as `WebGPU (amd rdna-4)`, and says so when the GPU could not be used. On the CPU, the number of threads can be chosen under Settings.
+  - The status shows the device really used, such as `WebGPU (amd rdna-4)`, and says so when the GPU could not be used. With the device set to the CPU, the number of threads can be chosen under Settings.
   - Page translation runs four batches of paragraphs side by side, each in order with its own history: with 2B on a Radeon RX 9070 XT, 80 paragraphs take 46 s instead of 66 (0.8B: 34 instead of 48).
 - The panel shows the speed in tokens per second while it translates and when it is done, and the box on a translated page shows the page's speed.
 - While the page in the current tab is being translated, the panel's page button stops it.
@@ -29,6 +29,14 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
 ### Fixed
 
 - Downloads in the app: PFN replaced every model file on 2026-11-06 (only the chat template changed, which the app does not use), and the files of the first revision are no longer served. The built-in model list now points to the new revision, and models downloaded before still count as downloaded.
+  - Partial downloads of the first revision, which can no longer be resumed, are removed (they could be gigabytes, and were neither shown nor deleted).
+- Output that repeats itself is retried with the repetition penalty (DRY) as designed: a setting of llama.cpp's had left it off, so the last retry ran the same way as the first.
+- With Auto off, a model that finishes loading no longer starts a translation, unless one was asked for while it loaded.
+- A download finishing no longer replaces a model chosen while it ran; the first download to finish becomes active only when no model is.
+- Swapping with Japanese ⇄ English as the target and an explicit source language sets the source to the translation's language.
+- Unloading or deleting a model while it loads no longer leaves "Loading… 100%" in the status bar, and a model whose files cannot be deleted stays selected.
+- A `settings.json` saved with a byte order mark is read, and one in another encoding than UTF-8 is kept aside instead of being overwritten.
+- The browser extension: closing the panel while it translated no longer stopped a page translation in progress; a page translation that fails stops all its batches; translations of a stopped page translation no longer reach the next page in the tab; and only the extension's own pages can connect as its panel.
 
 ## [0.3.0] - 2026-11-06
 

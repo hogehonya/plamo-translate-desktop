@@ -20,7 +20,7 @@
   - ダウンロードは中断しても続きから再開でき、SHA-256 で検証します。
   - 新しく公開されたファイルは、アプリを更新しなくても Hugging Face から自動で一覧に加わります。
 - CPU（AVX2 または AVX-512）でも、Vulkan 経由の GPU でも動きます。Linux でソースからビルドする場合は ROCm も使えます。
-  実行デバイスは選択でき、自動選択では単体 GPU を選びます。
+  実行デバイスは選択でき、「自動」ではこの PC で測った一番速いもの、測っていなければ単体 GPU を使います。
 - 英語と日本語の UI。既定では OS の言語に合わせます。ステータスバーの歯車から開く「設定」で変更でき、環境変数 `PLAMO_LANG=ja` または `en` を指定するとどちらよりも優先されます。
 - ライトとダークのテーマ。既定では OS の設定に合わせ、「設定」でどちらかに固定することもできます。
 - 原文と訳文の連動スクロール。片方でカーソルを動かすと、もう片方で対応する段落を選択します。「設定」でオフにできます。
@@ -48,7 +48,7 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
   llama.cpp 本体と、CPU・Vulkan のバックエンドはそこから読み込み、それ以外の場所からは読み込みません。
   Visual C++ ランタイムも同梱しているので、ほかに何かをインストールする必要はありません。
 - **Intel の NPU を積んだ Windows**（Core Ultra、試験的）: `-intel-npu` の zip は、同じアプリに OpenVINO の NPU ランタイムを加えたものです。
-  設定のデバイスで **NPU** を選びます（「自動」では選ばれません）。モデルを読み込んで最初の翻訳では、NPU 向けのコンパイルに時間がかかります。
+  **モデルと実行デバイス**（ステータスバーのモデルのボタン）のデバイスで **NPU** を選びます（「自動」では選ばれません）。モデルを読み込んで最初の翻訳では、NPU 向けのコンパイルに時間がかかります。
   結果はキャッシュするので、次からの起動では速くなります。NPU ではコンテキストが 8192 トークンなので、長文は小さめに区切って訳します。
   NPU のドライバは、PC のドライバか Windows Update で入ります。
   NPU は速さより、消費電力を抑えたり GPU を空けておいたりするためのものです。Core Ultra 7 356H では、2B の翻訳速度は
@@ -76,11 +76,11 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
 Windows と Linux では、Vulkan で使える単体 GPU があればそれで翻訳し、無ければ CPU が対応する最速の方式（AVX2 または AVX-512）で翻訳します。
 単体 GPU が無く内蔵 GPU がある PC では、最初にモデルを読み込むときに CPU と内蔵 GPU のどちらが速いかを測り、「自動」では速いほうを使います
 （内蔵 GPU は CPU よりずっと遅いものから、ずっと速いものまであるためです）。
-設定のデバイス欄の **速さを測って選ぶ** で、ハードウェアを変えたときなどに全デバイスを測り直せます。
+**モデルと実行デバイス**（ステータスバーのモデルのボタン）のデバイス欄の **速さを測って選ぶ** で、ハードウェアを変えたときなどに全デバイスを測り直せます。
 
 ## ブラウザ拡張
 
-配布物には、Chrome と Edge 用の拡張機能（`browser-extension/`）が入っています。アプリで選んだモデルで、ブラウザ上の文章を翻訳できます。
+配布物には、Chrome と Edge（137 以降）用の拡張機能（`browser-extension/`）が入っています。アプリで選んだモデルで、ブラウザ上の文章を翻訳できます。
 先にアプリを入れてから（[ダウンロード](#ダウンロード)を参照）、次の手順で連携します。
 
 1. アプリのステータスバーの歯車から「設定」を開き、「ブラウザ拡張」の **連携する** を押します。
@@ -110,7 +110,7 @@ Linux の Snap 版や Flatpak 版のブラウザは、ホストを起動でき�
 ### アプリなしで使う
 
 拡張機能だけでも、ブラウザ内でモデルを動かして翻訳できます
-（[wllama](https://github.com/ngxson/wllama): llama.cpp を WebAssembly にしたもの）。Chrome か Edge の 137 以降が必要です。
+（[wllama](https://github.com/ngxson/wllama): llama.cpp を WebAssembly にしたもの）。
 
 [Releases](https://github.com/tanakh/plamo-translate-desktop/releases) にある拡張機能だけの配布物
 （`plamo-translate-desktop-X.Y.Z-browser-extension.zip`）を使えば、アプリを入れずに試せます。
@@ -134,6 +134,9 @@ Linux の Snap 版や Flatpak 版のブラウザは、ホストを起動でき�
   測ったあとは **自動（GPU）** のように、どちらを使うかと測った速さを表示します。その下の **速さを測って選ぶ** で測り直せます。
   2B の生成速度は、Ryzen AI Max+ 395（Radeon 8060S）で毎秒 48 トークンほど、Radeon RX 9070 XT で 67、Ryzen 9 9950X の CPU で 18 でした。
   アプリより遅いものの、実用になります。長文の読み込みは CPU だと遅めです。
+  デバイスで **CPU** を選ぶと、その下でスレッド数を設定できます。
+  拡張機能は高性能な GPU を要求しますが、Chrome と Edge は Windows が割り当てた GPU を使います。画面を内蔵 GPU で表示している PC では、
+  Windows の「設定」→「システム」→「ディスプレイ」→「グラフィック」で、ブラウザに単体 GPU を割り当ててください。
 - アプリと同じく、5 分間使われないか **解放** を押すと、モデルを解放します。
 
 ## ソースからのビルド
@@ -203,7 +206,8 @@ cargo run -p engine --release --example download -- --list
 
 ### ファイルとログ
 
-モデル（`models/` の下）、モデル一覧のキャッシュ（`catalog.json`）、小さなログ（`app.log`）は次の場所に保存します。
+モデル（`models/` の下）、モデル一覧のキャッシュ（`catalog.json`）、小さなログ（`app.log` と、ブラウザ拡張のホストの `host.log`）、
+NPU 向けにコンパイルしたグラフ（`openvino-cache/`）は次の場所に保存します。
 
 - Windows: `%LOCALAPPDATA%\plamo-translate-desktop\data`
 - Linux: `~/.local/share/plamo-translate-desktop`（`$XDG_DATA_HOME`）
@@ -223,5 +227,6 @@ cargo run -p engine --release --example download -- --list
 
 PLaMo のモデルはこのリポジトリに含まれず、PLaMo コミュニティライセンスが適用されます。
 
-配布物にはサードパーティーのソフトウェア（Rust のクレート、llama.cpp、Lucide のアイコン、Windows 版では Visual C++ ランタイム）が含まれます。
-それらのライセンスは、各配布物の `THIRD-PARTY-NOTICES.txt` にあります（`scripts/notices.sh` で生成）。
+配布物にはサードパーティーのソフトウェアが含まれます。アプリの Rust のクレート、llama.cpp、Lucide のアイコン、ブラウザ拡張の wllama
+（Emscripten と Dawn でビルドしたもの）、Windows 版では Visual C++ ランタイム、Intel NPU 版では OpenVINO、oneTBB、OpenCL ローダーです。
+それらのライセンスは、各配布物の `THIRD-PARTY-NOTICES.txt` にあります（`scripts/notices.sh` で生成。拡張機能だけの配布物には、ブラウザ内エンジンの分だけ）。

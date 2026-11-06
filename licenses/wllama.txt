@@ -3,9 +3,10 @@ wllama (browser extension)
 
 The browser extension's in-browser engine runs wllama (vendor/wllama), llama.cpp (see "llama.cpp
 and ggml") compiled to WebAssembly with Emscripten. The build contains code from these projects,
-under these licenses. The C++ library and compiler runtime it also contains (LLVM's libc++,
-libc++abi and compiler-rt) are under Apache-2.0 with the LLVM exception, which asks for no notice
-in compiled code.
+under these licenses. It also contains code that asks for no notice in compiled code: LLVM's
+libc++, libc++abi and compiler-rt (Apache-2.0 with the LLVM exception), and, from llama.cpp's
+multimodal support, stb_image, miniaudio and a SHA-256 implementation (each offered in the public
+domain).
 
 wllama (https://github.com/ngxson/wllama):
 
@@ -111,6 +112,30 @@ JSON for Modern C++ (https://github.com/nlohmann/json), vendored by llama.cpp:
 MIT License
 
 Copyright (c) 2013-2025 Niels Lohmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+rotate-bits (https://github.com/jb55/rotate-bits.h), vendored by llama.cpp for its SHA-256:
+
+MIT License
+
+Copyright (c) 2021 William Casarin <jb55@jb55.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

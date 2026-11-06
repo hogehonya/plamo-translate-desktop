@@ -24,7 +24,10 @@ jobs:
     name: Build wllama
     runs-on: ubuntu-24.04
     steps:
+      # No credentials are kept: the build runs wllama's scripts and npm packages.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/checkout@v7
         with:

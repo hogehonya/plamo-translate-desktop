@@ -7,7 +7,7 @@
     "description": "This locale's folder in _locales; the extension uses it to tell which locale the browser picked."
   },
   "description": {
-    "message": "Translate text in the browser with PLaMo 3 Translate running locally in PLaMo Translate Desktop."
+    "message": "Translate text and pages with PLaMo 3 Translate on this computer: through PLaMo Translate Desktop, or right in the browser."
   },
   "menuTranslate": {
     "message": "Translate with PLaMo"

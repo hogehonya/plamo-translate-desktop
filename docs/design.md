@@ -72,10 +72,14 @@ crates/
   appdata/  Settings, file locations, logging, device selection: shared by app and host.
   app/      GPUI application (binary `plamo-translate-desktop`).
   host/     Native messaging host for the browser extension (binary `plamo-translate-host`).
-extension/  Browser extension (Manifest V3) for Chrome and Edge.
+extension/  Browser extension (Manifest V3) for Chrome and Edge; vendor/wllama is the
+            in-browser engine's WebAssembly build.
 assets/     Icon (scripts/gen_icons.py) and the Linux desktop entry.
 licenses/   License texts appended to THIRD-PARTY-NOTICES.txt (scripts/notices.sh).
-scripts/    Icon generator, notices generator, ROCm build environment.
+patches/    Patches applied to wllama before its build (.github/workflows/wllama.yml).
+scripts/    Icon and notices generators, the changelog's release notes, wllama's vendoring,
+            the macOS package, and the ROCm build environment.
+tests/      The extension's tests (Node).
 docs/       This document.
 ```
 
@@ -380,7 +384,8 @@ The implementation is `engine::llama::Session` (one llama.cpp context of a loade
 - Streamed text is applied as edits at the end of the output pane. Replacing the whole value every frame laid out the entire translation
   again and stalled the UI on long texts.
 - The status bar ends a translation with the time taken, the tokens, and the speed. When passages were cut, clicking the message selects the next one in both panes.
-- Settings (the gear): display language, theme, chunk size, history, and synchronized scrolling.
+- Settings (the gear): display language, theme, chunk size, history, synchronized scrolling, and the browser extension
+  (Connect and Disconnect the host, Open extension folder; see §12).
 - Streaming keeps the output pane's scroll position, so a reader can scroll through a long translation while it grows.
   A new translation starts at the top.
 - Japanese IME input goes through gpui-kit's textarea.
@@ -405,11 +410,12 @@ Future idea: a global hotkey that translates the clipboard (with the `global-hot
 
 ## 10. Settings
 
-The app saves `settings.json` in the platform config directory (`crates/app/src/settings.rs`):
-the selected model, the license acceptance, the device, the glossary, the UI language, the theme,
-the chunk and history sizes, and synchronized scrolling.
+The app saves `settings.json` in the platform config directory (`crates/appdata/src/settings.rs`, shared with the host):
+the selected model, the license acceptance, the device and the last device measurement, the glossary, the UI language,
+the theme, the chunk and history sizes, and synchronized scrolling.
 The language pair, style, context, auto-translate flag, and window geometry are not saved.
-A file that does not parse is kept as `settings.json.invalid` instead of being overwritten.
+A file that does not parse (or is not UTF-8; a byte order mark is skipped) is kept as `settings.json.invalid`
+instead of being overwritten.
 
 ## 11. Build, test, and distribution
 
@@ -417,12 +423,13 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
   WSLg has only a software Vulkan driver (lavapipe), so Vulkan inference cannot be tested there.
   ROCm, however, supports WSL2. The `rocm` feature (built with `scripts/rocm.sh`) runs the model on the RX 9070 XT from WSL2.
   For 2B Q4_K_M, generation runs at about 120–150 tok/s, against about 20 tok/s on the CPU.
-  ggml also lists the integrated GPU, but only the discrete GPU's architecture is compiled; automatic selection skips integrated GPUs anyway.
+  ggml also lists the integrated GPU, but only the discrete GPU's architecture is compiled, so it is not used there.
 - Windows binaries are built natively on GitHub Actions `windows-2025` (MSVC, Windows SDK, and CMake are preinstalled;
   the Vulkan SDK is installed by the workflow), not cross-compiled. Cross-compiling from Linux fails:
   - The `gpui-pre-windows` build script compiles its HLSL shaders with `fxc.exe` only when the build host is Windows.
   - Release builds then `include!` the generated shader bytes, so a Linux-hosted release build cannot compile.
-- CI runs on every push and pull request: rustfmt and clippy, and the tests, as two parallel Linux jobs with the latest stable Rust.
+- CI runs on every push and pull request, with the latest stable Rust: rustfmt and clippy, and the tests, as parallel Linux jobs;
+  clippy and the tests on macOS (Apple Silicon); and the extension's scripts and tests (Node).
   It builds no packages, so the slow parts (the Windows build, llama.cpp's Vulkan shaders, fat LTO) are not on every push.
 - Build configurations:
   - Windows: features `engine/vulkan` and `engine/dynamic-backends`. llama.cpp is built as DLLs
@@ -456,8 +463,8 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
     The notes are the version's section of `CHANGELOG.md` (`scripts/changelog.sh`), followed by GitHub's generated notes.
   - A manual run (**Run workflow**, from any branch) builds the same packages as workflow artifacts without publishing,
     versioned `X.Y.Z-dev.<commit>`, plus the Windows `translate.exe` for testing the engine on Windows GPUs.
-  - Windows: a portable zip with the exe, the DLLs and backend modules, the Visual C++ runtime, the READMEs, the licenses,
-    and `THIRD-PARTY-NOTICES.txt`.
+  - Windows: a portable zip with the app and the browser host (`plamo-translate-host`), the DLLs and backend modules,
+    the Visual C++ runtime, the browser extension (`browser-extension/`), the READMEs, the licenses, and `THIRD-PARTY-NOTICES.txt`.
   - Linux: a tar.gz with the same contents (no Visual C++ runtime), a desktop entry, and its icon.
   - macOS (Apple Silicon, from v0.4.0): `scripts/package-macos.sh` on a macos-15 runner, a disk image with the app bundle (llama.cpp linked
     statically with Metal, the shaders embedded; the host, and the extension in `Contents/Resources`), signed ad hoc and not notarized.
@@ -487,7 +494,8 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
 
 ## 12. Browser extension
 
-The extension (`extension/`) translates in the browser with the desktop app's model, through Chrome's native messaging.
+The extension (`extension/`) translates in the browser with the desktop app's model, through Chrome's native messaging,
+or, from v0.4.0, on its own with an in-browser engine (see "In-browser engine" below).
 
 - Components:
   - `plamo-translate-host` ships next to the app and shares its DLLs/shared libraries, models, and settings, so the package grows by about 1 MB.
