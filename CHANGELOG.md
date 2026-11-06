@@ -2,6 +2,13 @@
 
 All notable changes to PLaMo Translate Desktop. Each release's section here also becomes its release notes on GitHub.
 
+## [Unreleased]
+
+### Added
+
+- macOS (Apple Silicon) support. `scripts/package-macos.sh` builds the package: the app in a disk image, for macOS 13.3 or later. llama.cpp runs on the GPU through Metal. The Release workflow does not build it yet.
+  - **Connect** registers the browser host with Chrome, Chromium, Edge, and Brave in `~/Library/Application Support`. It used to write to `~/.config`, where only their Linux versions look.
+
 ## [0.3.0] - 2026-11-06
 
 ### Added
@@ -59,6 +66,7 @@ The first release.
 - English and Japanese UI, light and dark themes, and synchronized scrolling between the source and the translation.
 - Packages for Windows and Linux (x86-64), with third-party notices.
 
+[Unreleased]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.1.0...v0.2.0

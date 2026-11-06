@@ -3,8 +3,8 @@
 //! The extension in `extension/` talks to `plamo-translate-host`, which ships next to the app.
 //! A browser starts the host only if a manifest registered under [`HOST_NAME`] names it and
 //! allows the extension's ID. On Windows the manifest is a file in the app's data directory,
-//! referenced from the registry (Chrome and Edge); on Linux a copy goes into each browser's
-//! configuration directory.
+//! referenced from the registry (Chrome and Edge); on Linux and macOS a copy goes into each
+//! browser's configuration directory (under `~/.config` and `~/Library/Application Support`).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -177,19 +177,36 @@ mod platform {
 
     use super::HOST_NAME;
 
-    /// Configuration directories (under `$XDG_CONFIG_HOME`) of the browsers, per browser.
+    /// Configuration directories (under [`config_dir`]) of the browsers, per browser.
+    #[cfg(not(target_os = "macos"))]
     const BROWSERS: &[(&str, &str)] = &[
         ("Chrome", "google-chrome"),
         ("Chromium", "chromium"),
         ("Edge", "microsoft-edge"),
         ("Brave", "BraveSoftware/Brave-Browser"),
     ];
+    #[cfg(target_os = "macos")]
+    const BROWSERS: &[(&str, &str)] = &[
+        ("Chrome", "Google/Chrome"),
+        ("Chromium", "Chromium"),
+        ("Edge", "Microsoft Edge"),
+        ("Brave", "BraveSoftware/Brave-Browser"),
+    ];
 
+    /// `$XDG_CONFIG_HOME`, or `~/.config`.
+    #[cfg(not(target_os = "macos"))]
     fn config_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+    }
+
+    /// `~/Library/Application Support`. Browsers on macOS ignore `$XDG_CONFIG_HOME`.
+    #[cfg(target_os = "macos")]
+    fn config_dir() -> Option<PathBuf> {
+        std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join("Library/Application Support"))
     }
 
     fn manifest_file(browser_dir: &str) -> Option<PathBuf> {
@@ -240,6 +257,28 @@ mod platform {
             .filter_map(|(_, dir)| manifest_file(dir))
             .filter(|path| path.is_file())
             .collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::path::Path;
+
+        use super::{BROWSERS, manifest_file};
+
+        #[test]
+        fn chrome_finds_the_manifest_in_its_configuration_directory() {
+            let chrome = manifest_file(BROWSERS[0].1).unwrap();
+            let expected = if cfg!(target_os = "macos") {
+                "Library/Application Support/Google/Chrome/NativeMessagingHosts"
+            } else {
+                "google-chrome/NativeMessagingHosts"
+            };
+            assert!(
+                chrome.ends_with(Path::new(expected).join("com.github.tanakh.plamo_translate.json")),
+                "{}",
+                chrome.display()
+            );
+        }
     }
 }
 
