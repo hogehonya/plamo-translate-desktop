@@ -12,6 +12,7 @@
 # Environment:
 #   MACOSX_DEPLOYMENT_TARGET  oldest macOS to run on (default 13.3, as llama.cpp's Apple builds)
 #   CODESIGN_IDENTITY         signing identity (default "-", ad hoc)
+#   PACKAGE_VERSION           the version in the package's name (default: from the tags, below)
 #
 # Output: dist/<package>/ and <package>.dmg in the repository root.
 set -eu
@@ -22,9 +23,12 @@ test "$(uname -s)" = Darwin || { echo "this script runs on macOS" >&2; exit 1; }
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.3}"
 identity="${CODESIGN_IDENTITY:--}"
 
-# The version, as the Release workflow names it: X.Y.Z on a matching tag, else X.Y.Z-dev.<commit>.
+# The version, as the Release workflow names it (which passes it): X.Y.Z on a matching tag, else
+# X.Y.Z-dev.<commit>.
 crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
-if git describe --exact-match --tags --match "v$crate" HEAD >/dev/null 2>&1; then
+if [ -n "${PACKAGE_VERSION:-}" ]; then
+    version=$PACKAGE_VERSION
+elif git describe --exact-match --tags --match "v$crate" HEAD >/dev/null 2>&1; then
     version=$crate
 else
     version="$crate-dev.$(git rev-parse --short HEAD)"

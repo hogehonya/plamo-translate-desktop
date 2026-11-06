@@ -412,7 +412,10 @@
 
   // The background tells which runs the engine is on (`working`): up to one per batch running.
   // A pulsing frame over each, in a layer of our own above the page (the page is not touched),
-  // shows where the translation is while it takes its time (on the CPU, for example).
+  // shows where the translation is while it takes its time (on the CPU, for example). The layer
+  // is placed in the document, not fixed to the view, so that the frames scroll with the page
+  // (a fixed one lags while the browser scrolls); runs in scrolled containers are followed by
+  // redrawing on their scroll events.
   let working = [];
   /** The panel's setting for the frames (on by default). */
   let showMarks = true;
@@ -441,11 +444,11 @@
       if (!working.length) return;
       const host = document.createElement("div");
       host.setAttribute("data-plamo", "");
-      host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646;";
+      host.style.cssText = "position:absolute;top:0;left:0;width:0;height:0;pointer-events:none;z-index:2147483646;";
       const root = host.attachShadow({ mode: "closed" });
       root.innerHTML = `
         <style>
-          .frame { position: fixed; box-sizing: border-box; border: 2px solid rgba(13, 127, 218, .75);
+          .frame { position: absolute; box-sizing: border-box; border: 2px solid rgba(13, 127, 218, .75);
                    border-radius: 4px; background: rgba(13, 127, 218, .07); animation: pulse 1.6s ease-in-out infinite; }
           @keyframes pulse { 50% { border-color: rgba(13, 127, 218, .25); background: rgba(13, 127, 218, .02); } }
           @media (prefers-reduced-motion: reduce) { .frame { animation: none; } }
@@ -458,6 +461,8 @@
       frame.remove();
       marks.frames.delete(sid);
     }
+    // Positions relative to the layer, wherever the page's styles put its origin.
+    const origin = marks.host.getBoundingClientRect();
     for (const sid of working) {
       const rect = pending.has(sid) ? runRect(pending.get(sid).run) : null;
       let frame = marks.frames.get(sid);
@@ -473,8 +478,8 @@
         marks.frames.set(sid, frame);
       }
       Object.assign(frame.style, {
-        left: `${rect.left - 4}px`,
-        top: `${rect.top - 3}px`,
+        left: `${rect.left - origin.left - 4}px`,
+        top: `${rect.top - origin.top - 3}px`,
         width: `${rect.width + 8}px`,
         height: `${rect.height + 6}px`,
       });

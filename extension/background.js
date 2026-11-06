@@ -400,6 +400,13 @@ function startBatch(tabId, page, items) {
  */
 function schedule() {
   if ([...active].some((job) => job.kind !== "page")) return;
+  if (![...pages.values()].some((page) => page.pending.length)) return;
+  // How many batches run at once is known from the connection's first status (the in-browser
+  // engine tells its slots): until then nothing is sent, so that the first round is dealt too.
+  if (!host?.kind || status.engine !== host.kind) {
+    if (!host) connectHost();
+    return;
+  }
   const slots = batchSlots();
   while (active.size < slots) {
     const entry = [...pages].find(([, page]) => page.pending.length);

@@ -106,8 +106,10 @@ jobs:
           tool: cargo-about
 
       # The app bundle in a disk image, signed ad hoc and not notarized (the README says how to
-      # open it). The script names the package as the version job does, and runs its smoke tests.
+      # open it), named with the version job's version. The script runs its smoke tests.
       - name: Package
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: scripts/package-macos.sh
 
       - uses: actions/upload-artifact@v7
