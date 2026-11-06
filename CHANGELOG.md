@@ -20,6 +20,7 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
 ### Fixed
 
 - Windows packages build again from a clean cache: llama.cpp is now built with Ninja, as the Visual Studio 2026 generator ran its steps out of order.
+- On a GPU, the time spent reading the text was counted as generation, so the speed shown was a little low (and the prompt speed in the `translate` CLI far too high).
 
 ## [0.2.1] - 2026-11-06
 
