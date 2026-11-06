@@ -497,8 +497,19 @@ function renderMeasure() {
   button.disabled = measuring;
   button.textContent = t(measuring ? "measuring" : "measure");
   const m = options.measured;
-  const speed = (name, s) => (s?.seconds > 0 ? t("measuredSpeed", name, String(Math.round(s.generation))) : t("measuredFailed", name));
-  $("measured").textContent = m && !measuring ? t("measured", `${speed("GPU", m.gpu)} · ${speed("CPU", m.cpu)}`) : "";
+  if (!m || measuring) {
+    $("measured").replaceChildren();
+    return;
+  }
+  // Each device's result stays on one line; the line breaks between them.
+  const speed = (name, s) => {
+    const span = document.createElement("span");
+    span.className = "nowrap";
+    span.textContent = s?.seconds > 0 ? t("measuredSpeed", name, String(Math.round(s.generation))) : t("measuredFailed", name);
+    return span;
+  };
+  const [before, after = ""] = t("measured", "\u0001").split("\u0001");
+  $("measured").replaceChildren(before, speed("GPU", m.gpu), " · ", speed("CPU", m.cpu), after);
 }
 
 /** The engines, with the one the automatic setting uses when it is known. */
