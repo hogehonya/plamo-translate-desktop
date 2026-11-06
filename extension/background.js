@@ -35,8 +35,8 @@ let host = null;
 /** Settles once the new connection's `configure` is sent; messages wait for it. */
 let hostReady = Promise.resolve();
 /**
- * Whether the app's host answers (a promise), for automatic engine selection; asked again after
- * it fails.
+ * Whether the app's host answers (a promise), for automatic engine selection. Asked again after
+ * a release or after it fails, so that an app connected since is used from the next start.
  */
 let appAvailable;
 /** Resolves with the in-browser engine's port once its document connects. */
@@ -195,6 +195,7 @@ function release(reason) {
   if (!host) return;
   closeConnection(host);
   host = null;
+  appAvailable = undefined;
   downloads.clear();
   clearTimeout(idleTimer);
   // Closing our end fires no onDisconnect; end the jobs here.

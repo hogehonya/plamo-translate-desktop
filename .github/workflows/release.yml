@@ -58,7 +58,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Laid out like the extension in the other packages, with the in-browser engine's notices.
+      # The unzipped folder is the extension itself (as Load unpacked takes it), with the licenses
+      # and the in-browser engine's notices; the README's section on it is online.
       - name: Package
         run: |
           set -euo pipefail
@@ -69,11 +70,11 @@ jobs:
             exit 1
           fi
           dist="dist/$PACKAGE"
-          mkdir -p "$dist"
-          cp -r extension "$dist/browser-extension"
+          mkdir -p dist
+          cp -r extension "$dist"
           scripts/notices.sh extension "$dist/THIRD-PARTY-NOTICES.txt"
-          cp README.md README.ja.md LICENSE-MIT LICENSE-APACHE "$dist/"
-          find "$dist" -maxdepth 2 | sort
+          cp LICENSE-MIT LICENSE-APACHE "$dist/"
+          find "$dist" -maxdepth 1 | sort
           (cd dist && zip -qr "../$PACKAGE.zip" "$PACKAGE")
 
       - uses: actions/upload-artifact@v7

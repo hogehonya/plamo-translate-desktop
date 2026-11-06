@@ -459,8 +459,9 @@ A file that does not parse is kept as `settings.json.invalid` instead of being o
   - Windows: a portable zip with the exe, the DLLs and backend modules, the Visual C++ runtime, the READMEs, the licenses,
     and `THIRD-PARTY-NOTICES.txt`.
   - Linux: a tar.gz with the same contents (no Visual C++ runtime), a desktop entry, and its icon.
-  - The browser extension alone (from v0.4.0, for its in-browser engine): a zip with `browser-extension/`, the READMEs, the licenses,
-    and the in-browser engine's notices (`scripts/notices.sh extension`). The job checks that the manifest's version is the workspace's.
+  - The browser extension alone (from v0.4.0, for its in-browser engine): a zip whose folder is the extension itself, as Load unpacked
+    takes it (common for extensions outside the stores), with the licenses and the in-browser engine's notices (`scripts/notices.sh extension`);
+    the README's section on it is online. The job checks that the manifest's version is the workspace's.
   - Windows for Intel NPUs: the Windows zip plus `ggml-openvino.dll`, the OpenVINO runtime and NPU plugin with oneTBB, and the OpenCL loader.
     The Windows build always includes the OpenVINO backend (`GGML_OPENVINO=ON`, built against the OpenVINO archive and the Khronos OpenCL SDK);
     only this package ships it. The OpenVINO DLLs come from the `openvino` wheel on PyPI of the same build, which is Apache-2.0,
