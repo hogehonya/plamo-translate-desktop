@@ -66,6 +66,8 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
       > ~/.local/share/applications/plamo-translate-desktop.desktop
     cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
     ```
+- **Browser extension only** (`-browser-extension` zip, Chrome or Edge 137 or later): the extension without the app,
+  which translates with the model running in the browser. The unzipped folder is the extension; see [Without the app](#without-the-app).
 
 On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 On a PC with an integrated GPU and no discrete one, the first model load measures whether the CPU or the integrated GPU translates faster
@@ -75,6 +77,7 @@ On a PC with an integrated GPU and no discrete one, the first model load measure
 ## Browser extension
 
 The packages include an extension for Chrome and Edge (`browser-extension/`) that translates text in the browser with the model selected in the app.
+Install the app first (see [Download](#download)), then:
 
 1. In the app, open Settings (the gear in the status bar) and choose **Connect** under Browser extension.
    This registers the bundled `plamo-translate-host` with Chrome and Edge (on Linux also Chromium and Brave).
@@ -99,6 +102,35 @@ It ends, freeing the memory, after 5 minutes without use or when you choose **Re
 To update the app in place, release it and close the app first (the host keeps its files open). If you move the app's folder, choose Connect again.
 **Disconnect** in the same section removes the registration from the browsers (on Windows, from the registry); do this before deleting the app.
 Browsers installed as Snap or Flatpak packages on Linux cannot start the host.
+
+### Without the app
+
+The extension can also translate on its own, with the model running in the browser
+([wllama](https://github.com/ngxson/wllama): llama.cpp compiled to WebAssembly). It needs Chrome or Edge 137 or later.
+
+The browser extension package (`plamo-translate-desktop-X.Y.Z-browser-extension.zip` on the
+[Releases](https://github.com/tanakh/plamo-translate-desktop/releases) page) has the extension alone, to try it without installing the app:
+
+1. Unzip it. The folder it makes is the extension; keep it where it is, since the browser loads the extension from there.
+2. Open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked**, and select that folder.
+   Chrome and Edge install extensions from files only through their stores, hence Load unpacked.
+3. Open the panel with the toolbar button and download a model under **Settings** (see below).
+
+To update, replace the folder's files with the new version's and press the reload button on the extension in `chrome://extensions`:
+the settings and the downloaded models are kept. For the larger models and faster translation, install the app later (see [Download](#download))
+and choose **Connect** in its settings (step 1 above). The extension already loaded works with it, and **Automatic** uses the app from the next time
+the engine starts (after **Release**, or 5 minutes without use).
+
+- **Engine** under **Settings** in the panel: **Automatic** uses the app when it is connected (step 1 above) and the browser otherwise
+  (the list shows which it uses now); **PLaMo Translate Desktop** and **In the browser** choose one. The `browser-extension` folder of
+  the app's packages can also be loaded without the app.
+- In the browser, choose and download a model under **Settings**: 0.8B or 2B (Q4_K_M; the larger ones do not fit in WebAssembly's memory).
+  The first download asks you to accept the PLaMo Community License. Models are stored in the browser, separately from the app's.
+- **Device**: **Automatic** measures the CPU (WebAssembly) and the GPU (WebGPU) on the first translation and keeps the faster one,
+  shown as, for example, **Automatic (GPU)** with the speeds measured. **Measure and choose** below it measures them again.
+  With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT,
+  and 18 on the CPU of a Ryzen 9 9950X: slower than the app, but usable. Reading long texts is slower on the CPU.
+- As with the app, the model is released after 5 minutes without use, or with **Release**.
 
 ## Building from source
 

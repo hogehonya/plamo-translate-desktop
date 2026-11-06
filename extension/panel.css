@@ -18,6 +18,8 @@
   }
 }
 * { box-sizing: border-box; }
+/* `hidden` wins over the display of classes such as .license. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   padding: 12px;
@@ -45,6 +47,18 @@ details label { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 details label span { width: 5em; flex: none; }
 details select { flex: 1; min-width: 0; }
 .hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.browser-models { margin: 6px 0 0 calc(5em + 8px); display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.model-row { display: flex; align-items: center; gap: 6px; }
+.model-row .name { flex: 1; min-width: 0; }
+.model-row .state { color: var(--muted); }
+.model-row .state.error { color: var(--error); }
+/* Like a model row: the measurement on the left, wrapping, and the button at the right end. */
+.measure-row { margin: 4px 0 0 calc(5em + 8px); display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+/* Lines break at spaces only, not inside the words of Japanese text. */
+.measure-row #measured { flex: 1; min-width: 0; word-break: keep-all; }
+.measure-row button { flex: none; }
+.nowrap { white-space: nowrap; }
+.license { border-left: 3px solid var(--accent); padding: 4px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .controls select { flex: 1 1 10em; min-width: 0; }
 .controls button { flex: none; }
 select, button, textarea {
@@ -68,6 +82,9 @@ button.page-button {
   font-weight: 600;
 }
 button.page-button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* While the active tab translates, the same button stops it. */
+button.page-button.running { border-color: var(--error); color: var(--error); }
+button.page-button.running:hover { background: color-mix(in srgb, var(--error) 12%, transparent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { background: var(--error); border-color: var(--error); color: #fff; }
 textarea { width: 100%; padding: 8px; resize: vertical; max-height: 50vh; }

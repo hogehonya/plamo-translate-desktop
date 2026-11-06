@@ -46,6 +46,8 @@
   let done = 0;
   let observer = null;
   let ui = null;
+  /** Tokens per second of the last batch, from the background. */
+  let speed = null;
   /** Stopped by the user, with paragraphs left that Resume would translate. */
   let stopped = false;
 
@@ -226,10 +228,14 @@
           pending.clear();
           render();
           break;
+        case "speed":
+          speed = message.tokensPerSecond;
+          render();
+          break;
         case "stopped":
-          // Another page started translating.
+          // From the panel's button, or because another page started translating.
           stopLocally();
-          render(t("pageStoppedForOther"));
+          render(message.reason === "panel" ? t("pageStopped") : t("pageStoppedForOther"));
           break;
         case "error":
           // Sent to every page when the connection ends; nothing to say if this one was done.
@@ -316,7 +322,9 @@
     ui.resume.textContent = t("pageResume");
     ui.undo.textContent = t("pageUndo");
     const working = pending.size > 0;
-    ui.text.textContent = message ?? (working ? t("pageProgress", String(done), String(total)) : t("pageDone", String(done)));
+    const progress = working ? t("pageProgress", String(done), String(total)) : t("pageDone", String(done));
+    const rate = speed ? ` · ${t("liveSpeed", speed.toFixed(1))}` : "";
+    ui.text.textContent = message ?? progress + rate;
     ui.stop.hidden = !working;
     ui.resume.hidden = working || !stopped;
     ui.undo.hidden = applied.length === 0;
@@ -376,6 +384,7 @@
 
   async function start() {
     stopped = false;
+    speed = null;
     const [settings, messages] = await Promise.all([
       chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" }),
       // The display language's messages, for t() in i18n.js (injected with this file).

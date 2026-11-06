@@ -50,3 +50,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --release --locked
+
+  extension:
+    name: Extension
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # The syntax of every script (Node recognizes the ES modules), then the tests.
+      - run: for f in extension/*.js; do node --check "$f"; done
+      - run: node tests/extension/translator.test.mjs

@@ -23,11 +23,30 @@
 
     <details id="settings">
       <summary data-i18n="settings"></summary>
+      <label><span data-i18n="engine"></span><select id="engine"></select></label>
       <label><span data-i18n="model"></span><select id="model"></select></label>
+      <!-- The in-browser engine's models: download, progress, delete. -->
+      <div id="browserModels" class="browser-models" hidden>
+        <div id="modelRows"></div>
+        <div id="license" class="license" hidden>
+          <span data-i18n="licenseNotice"></span>
+          <a id="licenseLink" target="_blank" rel="noopener" data-i18n="licenseRead"></a>
+          <button id="licenseAccept" class="small" data-i18n="licenseAccept"></button>
+        </div>
+      </div>
       <label><span data-i18n="device"></span><select id="device"></select></label>
+      <!-- The in-browser engine measures its devices again; Automatic then uses the faster. -->
+      <div id="measureRow" class="measure-row" hidden>
+        <span id="measured"></span>
+        <button id="measure" class="small" data-i18n="measure" data-i18n-title="measureTitle"></button>
+      </div>
+      <label id="threadsRow" hidden><span data-i18n="threads"></span><select id="threads"></select></label>
       <label><span data-i18n="pageMode"></span><select id="pageMode"></select></label>
       <label><span data-i18n="uiLanguage"></span><select id="uiLanguage"></select></label>
-      <p class="hint" data-i18n="settingsHint"></p>
+      <!-- In the browser, a link to setting up the app, which the larger models need. -->
+      <p class="hint"><span id="settingsHint"></span> <a id="appGuide" href="#" hidden data-i18n="appGuide"></a></p>
+      <!-- Back to a first start, for example to see the license notice again. -->
+      <p><button id="resetSettings" class="small" data-i18n="resetSettings"></button></p>
     </details>
 
     <div class="controls">

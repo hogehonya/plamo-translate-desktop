@@ -2,6 +2,32 @@
 
 All notable changes to PLaMo Translate Desktop. Each release's section here also becomes its release notes on GitHub.
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- The browser extension translates on its own too, with the model running in the browser: [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to WebAssembly) on the CPU or the GPU (WebGPU). The app is not needed for it. See "Without the app" in the README.
+  - **Engine** under Settings in the panel: Automatic (the app when it is connected, otherwise the browser), PLaMo Translate Desktop, or In the browser.
+  - The 0.8B and 2B models (Q4_K_M), downloaded into the browser from the panel after accepting the PLaMo Community License. The larger ones do not fit in WebAssembly's memory.
+  - Device: Automatic measures the CPU and the GPU on the first translation and keeps the faster one; the high-performance GPU is used. With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT, and 18 on the CPU of a Ryzen 9 9950X.
+  - Released after 5 minutes without use, or with Release, like the app's host.
+  - The panel links to the README's steps for setting up the app, which the larger models need.
+  - A package with the extension alone (`…-browser-extension.zip`), for trying it without the app.
+  - The status shows the device really used, such as `WebGPU (amd rdna-4)`, and says so when the GPU could not be used. On the CPU, the number of threads can be chosen under Settings.
+  - Page translation runs four batches of paragraphs side by side, each in order with its own history: with 2B on a Radeon RX 9070 XT, 80 paragraphs take 46 s instead of 66 (0.8B: 34 instead of 48).
+- The panel shows the speed in tokens per second while it translates and when it is done, and the box on a translated page shows the page's speed.
+- While the page in the current tab is being translated, the panel's page button stops it.
+- The panel shows what Automatic uses: the engine (the app or the browser) and the device, such as **Automatic (GPU)** with the speeds measured in the browser, or the device the app measured. **Measure and choose** under the device measures the browser's GPU and CPU again.
+- Reset settings under Settings in the panel: back to a first start (the license acceptance, the choices, the measured device); downloaded models are kept.
+
+### Changed
+
+- The extension needs Chrome or Edge 137 or later.
+
+### Fixed
+
+- Downloads in the app: PFN replaced every model file on 2026-11-06 (only the chat template changed, which the app does not use), and the files of the first revision are no longer served. The built-in model list now points to the new revision, and models downloaded before still count as downloaded.
+
 ## [0.3.0] - 2026-11-06
 
 ### Added
@@ -59,6 +85,7 @@ The first release.
 - English and Japanese UI, light and dark themes, and synchronized scrolling between the source and the translation.
 - Packages for Windows and Linux (x86-64), with third-party notices.
 
+[0.4.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/tanakh/plamo-translate-desktop/compare/v0.1.0...v0.2.0

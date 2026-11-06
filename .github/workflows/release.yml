@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the Windows and Linux packages with the size-optimized `dist` profile, and the Windows
-# package for Intel NPUs.
+# Builds the Windows and Linux packages with the size-optimized `dist` profile, the Windows
+# package for Intel NPUs, and the browser extension alone (which translates in the browser).
 # - Pushing a tag `vX.Y.Z` (matching the workspace version) publishes a GitHub release.
 # - Running the workflow manually builds the packages as artifacts only, from any branch.
 
@@ -48,6 +48,39 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version"
+
+  extension:
+    name: Browser extension package
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      PACKAGE: plamo-translate-desktop-${{ needs.version.outputs.version }}-browser-extension
+    steps:
+      - uses: actions/checkout@v7
+
+      # The unzipped folder is the extension itself (as Load unpacked takes it), with the licenses
+      # and the in-browser engine's notices; the README's section on it is online.
+      - name: Package
+        run: |
+          set -euo pipefail
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          manifest=$(jq -r .version extension/manifest.json)
+          if [[ "$manifest" != "$crate" ]]; then
+            echo "::error::extension/manifest.json has version $manifest, the workspace $crate"
+            exit 1
+          fi
+          dist="dist/$PACKAGE"
+          mkdir -p dist
+          cp -r extension "$dist"
+          scripts/notices.sh extension "$dist/THIRD-PARTY-NOTICES.txt"
+          cp LICENSE-MIT LICENSE-APACHE "$dist/"
+          find "$dist" -maxdepth 1 | sort
+          (cd dist && zip -qr "../$PACKAGE.zip" "$PACKAGE")
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PACKAGE }}
+          path: ${{ env.PACKAGE }}.zip
 
   linux:
     name: Linux package
@@ -225,10 +258,30 @@ jobs:
       # llama.cpp builds with Ninja and the MSVC environment: with the Visual Studio 2026
       # generator, MSBuild runs the install step of ggml-vulkan's vulkan-shaders-gen external
       # project before its build step on a fresh build (MSB8066).
-      - uses: ilammy/msvc-dev-cmd@v1
+      # The environment is vcvars64.bat's (compiler, linker and SDK in PATH, INCLUDE and LIB):
+      # the variables it changes are passed to the later steps. ilammy/msvc-dev-cmd did this, but
+      # it is no longer updated and runs on the deprecated Node.js 20.
+      - name: Use the MSVC developer environment
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw "no Visual Studio with the C++ x64 tools" }
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
+          $after = cmd /c "`"$vcvars`" >nul && set"
+          if ($LASTEXITCODE -ne 0) { throw "vcvars64.bat failed" }
+          foreach ($line in $after) {
+            if ($line -match '^([^=]+)=(.*)$' -and $before[$Matches[1]] -cne $Matches[2]) {
+              "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
       - name: Use Ninja for CMake
         shell: pwsh
         run: |
+          # From the previous step.
+          (Get-Command cl).Source
           if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { python -m pip install ninja }
           ninja --version
           "CMAKE_GENERATOR=Ninja" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -369,7 +422,7 @@ jobs:
   publish:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, linux, windows]
+    needs: [version, extension, linux, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
