@@ -576,9 +576,10 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
       per token, so streamed batches took as many steps side by side as one after another.
     - A panel translation stops all the batches (they are sent again after it), so it runs alone at full speed.
       `cancel` takes the job's `id`; the app's host ignores it.
-    - Measured on a Radeon RX 9070 XT with 80 paragraphs, from the model loaded to the last: 2B 66 s one batch at a time, 53 s
-      side by side; replaying the same flow, 0.8B 48 s and 34 s, and on the CPU 102 s and 91 s. The prompts, which batching does not
-      speed up, take about half the time (WebGPU reads 2B prompts at about 180 tok/s).
+    - Measured on a Radeon RX 9070 XT with 80 paragraphs, from the model loaded to the last: 2B 66 s one batch at a time, 46 s
+      side by side (53 s with the prompt cache, whose copies cost time too); replaying the same flow, 0.8B 48 s and 34 s, and on the
+      CPU 102 s and 87 s. The prompts, which batching does not speed up, take about half the time (WebGPU reads 2B prompts at about
+      180 tok/s).
   - Speeds in the panel: the pieces of text received (one token each, from either engine) over the time since the first.
     For page translation, the background counts the tokens of the page's batches (each `segment` of the in-browser engine carries
     its tokens; the app's host reports them in `done`) over the time since its first batch started.
