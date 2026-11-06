@@ -288,7 +288,10 @@ function onBatchMessage(job, message) {
     return;
   }
   // The batch starts once the model is loaded: the speed leaves the loading out.
-  if (message.type === "started" && page) page.busySince ??= performance.now();
+  if (message.type === "started") {
+    job.started = true;
+    if (page) page.busySince ??= performance.now();
+  }
   if (message.type !== "done" && message.type !== "error") return;
   if (!page) return;
   if (message.type === "done" && !job.cancelled) countTokens(page, message.tokens - job.counted);
@@ -403,6 +406,22 @@ function reportPages(port = null) {
   if (port) post(port, { type: "pages", running });
   else if (key !== reportedPages) broadcast({ type: "pages", running });
   reportedPages = key;
+  for (const [tabId, page] of pages) reportWorking(tabId, page);
+}
+
+/**
+ * Tells a page which of its runs the host is translating, when that changes: the first not done
+ * of each batch it runs (a batch goes in order), which the page marks.
+ */
+function reportWorking(tabId, page) {
+  const sids = [...active]
+    .filter((job) => job.kind === "page" && job.tabId === tabId && job.started && !job.cancelled)
+    .map((job) => job.items.find((item) => !item.done)?.sid)
+    .filter((sid) => sid != null);
+  const key = sids.join(",");
+  if (key === page.working) return;
+  page.working = key;
+  post(page.port, { type: "working", sids });
 }
 
 // ---- Panels ----
@@ -424,6 +443,8 @@ function onPanelMessage(port, message) {
       active.add(job);
       post(port, { type: "accepted", id: job.id });
       sendHost({ type: "translate", id: job.id, text: message.text, target: message.target, style: message.style });
+      // The page batches it interrupts are no longer on their runs.
+      reportPages();
       break;
     }
     case "cancel":

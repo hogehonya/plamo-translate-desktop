@@ -222,17 +222,22 @@
           apply(item, message.text);
           done++;
           render();
+          drawMarks();
           break;
         }
         case "idle":
           // After a stop or a failure, the box keeps saying so.
           if (stopped) break;
           pending.clear();
+          setWorking([]);
           render();
           break;
         case "speed":
           speed = message.tokensPerSecond;
           render();
+          break;
+        case "working":
+          setWorking(message.sids);
           break;
         case "stopped":
           // From the panel's button, or because another page started translating.
@@ -343,9 +348,110 @@
     for (const item of pending.values()) for (const node of item.run) handled.delete(node);
     stopped = pending.size > 0;
     pending.clear();
+    setWorking([]);
     observer?.disconnect();
     observer = null;
   }
+
+  // ---- The runs being translated ----
+
+  // The background tells which runs the engine is on (`working`): up to one per batch running.
+  // A pulsing frame over each, in a layer of our own above the page (the page is not touched),
+  // shows where the translation is while it takes its time (on the CPU, for example).
+  let working = [];
+  /** The panel's setting for the frames (on by default). */
+  let showMarks = true;
+  /** The layer: { host, root, frames: Map(sid → element) }. */
+  let marks = null;
+  let marksTimer = null;
+
+  function setWorking(sids) {
+    working = sids.filter((sid) => pending.has(sid));
+    drawMarks();
+    // The page moves under the frames as translations replace text: follow it.
+    if (working.length && !marksTimer) marksTimer = setInterval(drawMarks, 500);
+    if (!working.length && marksTimer) {
+      clearInterval(marksTimer);
+      marksTimer = null;
+    }
+  }
+
+  function drawMarks() {
+    if (!showMarks) {
+      marks?.host.remove();
+      marks = null;
+      return;
+    }
+    if (!marks) {
+      if (!working.length) return;
+      const host = document.createElement("div");
+      host.setAttribute("data-plamo", "");
+      host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646;";
+      const root = host.attachShadow({ mode: "closed" });
+      root.innerHTML = `
+        <style>
+          .frame { position: fixed; box-sizing: border-box; border: 2px solid rgba(13, 127, 218, .75);
+                   border-radius: 4px; background: rgba(13, 127, 218, .07); animation: pulse 1.6s ease-in-out infinite; }
+          @keyframes pulse { 50% { border-color: rgba(13, 127, 218, .25); background: rgba(13, 127, 218, .02); } }
+          @media (prefers-reduced-motion: reduce) { .frame { animation: none; } }
+        </style>`;
+      document.documentElement.append(host);
+      marks = { host, root, frames: new Map() };
+    }
+    for (const [sid, frame] of marks.frames) {
+      if (working.includes(sid) && pending.has(sid)) continue;
+      frame.remove();
+      marks.frames.delete(sid);
+    }
+    for (const sid of working) {
+      const rect = pending.has(sid) ? runRect(pending.get(sid).run) : null;
+      let frame = marks.frames.get(sid);
+      if (!rect) {
+        frame?.remove();
+        marks.frames.delete(sid);
+        continue;
+      }
+      if (!frame) {
+        frame = document.createElement("div");
+        frame.className = "frame";
+        marks.root.append(frame);
+        marks.frames.set(sid, frame);
+      }
+      Object.assign(frame.style, {
+        left: `${rect.left - 4}px`,
+        top: `${rect.top - 3}px`,
+        width: `${rect.width + 8}px`,
+        height: `${rect.height + 6}px`,
+      });
+    }
+  }
+
+  /** Where the run's nodes are on screen, or null if they are gone or take no space. */
+  function runRect(run) {
+    if (!run[0]?.isConnected || !run[run.length - 1].isConnected) return null;
+    const range = document.createRange();
+    range.setStartBefore(run[0]);
+    range.setEndAfter(run[run.length - 1]);
+    const rect = range.getBoundingClientRect();
+    return rect.width || rect.height ? rect : null;
+  }
+
+  let marksFrame = 0;
+  const redrawMarks = () => {
+    if (!working.length || marksFrame) return;
+    marksFrame = requestAnimationFrame(() => {
+      marksFrame = 0;
+      drawMarks();
+    });
+  };
+  document.addEventListener("scroll", redrawMarks, { capture: true, passive: true });
+  window.addEventListener("resize", redrawMarks, { passive: true });
+  // Turned on or off in the panel, also while the page translates.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.pageMarks) return;
+    showMarks = changes.pageMarks.newValue !== false;
+    drawMarks();
+  });
 
   /** The element whose position stands for `run`. */
   function anchor(run) {
@@ -388,12 +494,13 @@
     stopped = false;
     speed = null;
     const [settings, messages] = await Promise.all([
-      chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace" }),
+      chrome.storage.local.get({ target: "auto", style: "", pageMode: "replace", pageMarks: true }),
       // The display language's messages, for t() in i18n.js (injected with this file).
       chrome.runtime.sendMessage({ type: "ui_messages" }).catch(() => null),
     ]);
     uiMessages = messages;
     mode = settings.pageMode;
+    showMarks = settings.pageMarks !== false;
     style = settings.style;
     target = settings.target;
     if (target === "auto") {

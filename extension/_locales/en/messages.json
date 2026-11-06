@@ -630,5 +630,9 @@
   "appGuideUrl": {
     "message": "https://github.com/tanakh/plamo-translate-desktop#browser-extension",
     "description": "The README section on the browser extension, in this language"
+  },
+  "pageMarks": {
+    "message": "Frame the paragraphs being translated",
+    "description": "Setting: a pulsing frame on the page over the paragraphs the engine is translating"
   }
 }

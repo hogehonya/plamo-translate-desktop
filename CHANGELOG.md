@@ -19,6 +19,7 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
   - Page translation runs four batches of paragraphs side by side, each in order with its own history: with 2B on a Radeon RX 9070 XT, 80 paragraphs take 46 s instead of 66 (0.8B: 34 instead of 48).
 - The panel shows the speed in tokens per second while it translates and when it is done, and the box on a translated page shows the page's speed.
 - While the page in the current tab is being translated, the panel's page button stops it.
+- A pulsing frame on the page marks the paragraphs being translated (with the in-browser engine, up to four at once, in different parts of the page). **Settings** in the panel can turn it off.
 - The panel shows what Automatic uses: the engine (the app or the browser) and the device, such as **Automatic (GPU)** with the speeds measured in the browser, or the device the app measured. **Measure and choose** under the device measures the browser's GPU and CPU again.
 - Reset settings under Settings in the panel: back to a first start (the license acceptance, the choices, the measured device); downloaded models are kept.
 

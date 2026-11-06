@@ -543,6 +543,9 @@ or, from v0.4.0, on its own with an in-browser engine (see "In-browser engine" b
   - The translation is parsed inertly (`DOMParser`) and rebuilt from text nodes and clones of the run's own elements, looked up by index,
     so links keep their targets and nothing the model writes can add attributes, elements, or scripts. Unknown or repeated indices keep only their text.
   - The runs in view go first; when scrolling stops, the pending runs in view move to the front of the queue (`prioritize`).
+  - The background tells the page which runs the host is on (`working`: the first not done of each batch running, since a batch
+    goes in order), and page.js frames them in a layer of its own above the page (a shadow root with fixed boxes over each run's
+    range, redrawn on scrolling and every half second), leaving the page untouched. The panel's setting `pageMarks` turns it off.
     Starting a page translation stops those of other tabs (their batch is cancelled at once); they can resume from their page.
     New content (infinite scrolling) is picked up by a `MutationObserver`. Stop keeps what is translated, and Resume sends the rest.
   - Replacing (the default) or showing the translation below the original (without the copies' ids); the original nodes are kept to restore the page.

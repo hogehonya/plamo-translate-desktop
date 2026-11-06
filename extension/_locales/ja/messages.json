@@ -630,5 +630,9 @@
   "appGuideUrl": {
     "message": "https://github.com/tanakh/plamo-translate-desktop/blob/main/README.ja.md#%E3%83%96%E3%83%A9%E3%82%A6%E3%82%B6%E6%8B%A1%E5%BC%B5",
     "description": "The README section on the browser extension, in this language"
+  },
+  "pageMarks": {
+    "message": "翻訳中の段落を枠で示す",
+    "description": "Setting: a pulsing frame on the page over the paragraphs the engine is translating"
   }
 }

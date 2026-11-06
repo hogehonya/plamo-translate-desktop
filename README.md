@@ -96,7 +96,8 @@ Install the app first (see [Download](#download)), then:
    The browser lets the panel's button into a tab only after the toolbar button or the right-click menu was used on it, until the tab
    goes to another site; on other tabs the panel offers to allow the extension on all sites.
    Paragraphs are translated in place, keeping links and formatting: those in view first, and when you scroll, the ones you scrolled to.
-   A box at the bottom right shows the progress and can stop, resume, or restore the page. Translating another page stops this one,
+   A box at the bottom right shows the progress and can stop, resume, or restore the page, and a frame marks the paragraphs being
+   translated (**Settings** in the panel can turn it off). Translating another page stops this one,
    which can be resumed later.
    **Pages** under **Settings** in the panel shows translations below the original instead.
 
