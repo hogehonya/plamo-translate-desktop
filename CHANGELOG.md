@@ -12,6 +12,7 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
   - Device: Automatic measures the CPU and the GPU on the first translation and keeps the faster one; the high-performance GPU is used. With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT, and 18 on the CPU of a Ryzen 9 9950X.
   - Released after 5 minutes without use, or with Release, like the app's host.
   - The panel links to the README's steps for setting up the app, which the larger models need.
+  - A package with the extension alone (`…-browser-extension.zip`), for trying it without the app.
   - The status shows the device really used, such as `WebGPU (amd rdna-4)`, and says so when the GPU could not be used. On the CPU, the number of threads can be chosen under Settings.
   - Page translation runs four batches of paragraphs side by side, each in order with its own history: with 2B on a Radeon RX 9070 XT, 80 paragraphs take 46 s instead of 66 (0.8B: 34 instead of 48).
 - The panel shows the speed in tokens per second while it translates and when it is done, and the box on a translated page shows the page's speed.

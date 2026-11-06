@@ -66,6 +66,8 @@ SHA-256 のチェックサムは `SHA256SUMS.txt` にあります。最新の変
       > ~/.local/share/applications/plamo-translate-desktop.desktop
     cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
     ```
+- **ブラウザ拡張のみ**（`-browser-extension` の zip、Chrome か Edge の 137 以降）: アプリを含まない拡張機能だけのものです。
+  ブラウザ内でモデルを動かして翻訳します。[アプリなしで使う](#アプリなしで使う) を参照してください。
 
 どちらも、Vulkan で使える単体 GPU があればそれで翻訳し、無ければ CPU が対応する最速の方式（AVX2 または AVX-512）で翻訳します。
 単体 GPU が無く内蔵 GPU がある PC では、最初にモデルを読み込むときに CPU と内蔵 GPU のどちらが速いかを測り、「自動」では速いほうを使います
@@ -107,7 +109,7 @@ Linux の Snap 版や Flatpak 版のブラウザは、ホストを起動でき�
 - パネルの **設定** の **エンジン**: **自動** は、アプリと連携していれば（上の手順 1）アプリを、そうでなければブラウザ内を使います
   （一覧に、いまどちらを使っているかを表示します）。
   **PLaMo Translate Desktop** と **ブラウザ内** では、どちらかに固定します。アプリを入れずに、配布物の `browser-extension` フォルダだけを
-  読み込んで使うこともできます（上の手順 2）。
+  読み込んで使うこともできます（上の手順 2）。拡張機能だけの配布物（`-browser-extension` の zip）もあります。
 - ブラウザ内では、**設定** でモデルを選んでダウンロードします。使えるのは 0.8B と 2B（Q4_K_M）で、それより大きいモデルは WebAssembly のメモリに収まりません。
   最初のダウンロードの前に、PLaMo Community License への同意を求めます。モデルはアプリとは別に、ブラウザ内に保存します。
 - **デバイス**: **自動** は、最初の翻訳で CPU（WebAssembly）と GPU（WebGPU）の速さを測り、速いほうを使います。

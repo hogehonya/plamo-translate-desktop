@@ -66,6 +66,8 @@ with their SHA-256 checksums in `SHA256SUMS.txt`. For the latest changes, build 
       > ~/.local/share/applications/plamo-translate-desktop.desktop
     cp plamo-translate-desktop.png ~/.local/share/icons/hicolor/256x256/apps/
     ```
+- **Browser extension only** (`-browser-extension` zip, Chrome or Edge 137 or later): the extension without the app,
+  which translates with the model running in the browser. See [Without the app](#without-the-app).
 
 On both, translation uses a discrete GPU through Vulkan when one is available, and otherwise the fastest CPU code path the CPU supports (AVX2 or AVX-512).
 On a PC with an integrated GPU and no discrete one, the first model load measures whether the CPU or the integrated GPU translates faster
@@ -108,7 +110,7 @@ The extension can also translate on its own, with the model running in the brows
 
 - **Engine** under **Settings** in the panel: **Automatic** uses the app when it is connected (step 1 above) and the browser otherwise
   (the list shows which it uses now); **PLaMo Translate Desktop** and **In the browser** choose one. The extension can then be loaded without installing the app
-  (step 2, with the `browser-extension` folder of a package).
+  (step 2, with the `browser-extension` folder of a package, such as the `-browser-extension` zip, which has only the extension).
 - In the browser, choose and download a model under **Settings**: 0.8B or 2B (Q4_K_M; the larger ones do not fit in WebAssembly's memory).
   The first download asks you to accept the PLaMo Community License. Models are stored in the browser, separately from the app's.
 - **Device**: **Automatic** measures the CPU (WebAssembly) and the GPU (WebGPU) on the first translation and keeps the faster one,

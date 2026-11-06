@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the Windows and Linux packages with the size-optimized `dist` profile, and the Windows
-# package for Intel NPUs.
+# Builds the Windows and Linux packages with the size-optimized `dist` profile, the Windows
+# package for Intel NPUs, and the browser extension alone (which translates in the browser).
 # - Pushing a tag `vX.Y.Z` (matching the workspace version) publishes a GitHub release.
 # - Running the workflow manually builds the packages as artifacts only, from any branch.
 
@@ -48,6 +48,38 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version"
+
+  extension:
+    name: Browser extension package
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      PACKAGE: plamo-translate-desktop-${{ needs.version.outputs.version }}-browser-extension
+    steps:
+      - uses: actions/checkout@v7
+
+      # Laid out like the extension in the other packages, with the in-browser engine's notices.
+      - name: Package
+        run: |
+          set -euo pipefail
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          manifest=$(jq -r .version extension/manifest.json)
+          if [[ "$manifest" != "$crate" ]]; then
+            echo "::error::extension/manifest.json has version $manifest, the workspace $crate"
+            exit 1
+          fi
+          dist="dist/$PACKAGE"
+          mkdir -p "$dist"
+          cp -r extension "$dist/browser-extension"
+          scripts/notices.sh extension "$dist/THIRD-PARTY-NOTICES.txt"
+          cp README.md README.ja.md LICENSE-MIT LICENSE-APACHE "$dist/"
+          find "$dist" -maxdepth 2 | sort
+          (cd dist && zip -qr "../$PACKAGE.zip" "$PACKAGE")
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PACKAGE }}
+          path: ${{ env.PACKAGE }}.zip
 
   linux:
     name: Linux package
@@ -389,7 +421,7 @@ jobs:
   publish:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, linux, windows]
+    needs: [version, extension, linux, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
