@@ -11,6 +11,10 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
   - The 0.8B and 2B models (Q4_K_M), downloaded into the browser from the panel after accepting the PLaMo Community License. The larger ones do not fit in WebAssembly's memory.
   - Device: Automatic measures the CPU and the GPU on the first translation and keeps the faster one; the high-performance GPU is used. With 2B, generation runs at about 48 tokens/s on a Ryzen AI Max+ 395 (Radeon 8060S), 67 on a Radeon RX 9070 XT, and 18 on the CPU of a Ryzen 9 9950X.
   - Released after 5 minutes without use, or with Release, like the app's host.
+  - The status shows the device really used, such as `WebGPU (amd rdna-4)`, and says so when the GPU could not be used. On the CPU, the number of threads can be chosen under Settings.
+- The panel shows the speed in tokens per second while it translates and when it is done, and the box on a translated page shows each batch's speed.
+- While the page in the current tab is being translated, the panel's page button stops it.
+- Reset settings under Settings in the panel: back to a first start (the license acceptance, the choices, the measured device); downloaded models are kept.
 
 ### Changed
 

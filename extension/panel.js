@@ -79,7 +79,13 @@ for (const id of ["model", "device", "threads"]) {
     chrome.storage.local.set({ [key]: choices[key] });
     const { model, device, threads } = choices[key];
     send({ type: "configure", model: model || undefined, device: device || undefined, threads: threads || undefined });
+    if (id === "device") updateThreadsVisibility();
   });
+}
+
+/** The thread count applies to the in-browser engine on the CPU only, so it shows only then. */
+function updateThreadsVisibility() {
+  $("threadsRow").hidden = !(engine === "browser" && $("device").value === "cpu");
 }
 
 $("resetSettings").addEventListener("click", async () => {
@@ -445,7 +451,7 @@ function renderBrowserOptions(options) {
   const threads = $("threads");
   threads.replaceChildren(new Option(t("threadsAuto"), ""), ...counts.map((n) => new Option(String(n), String(n))));
   threads.value = options.threads ? String(options.threads) : "";
-  $("threadsRow").hidden = false;
+  updateThreadsVisibility();
   renderBrowserModels();
 }
 

@@ -561,6 +561,15 @@ The extension (`extension/`) translates in the browser with the desktop app's mo
     which gets the integrated GPU beside a discrete one; `engine.js` wraps `URL.createObjectURL` so that wllama's worker code starts by
     defaulting `requestAdapter` to `high-performance`. On `auto`, the first load measures both (a warm-up text, then a different one,
     since llama.cpp would reuse the same prompt) and keeps the faster, saved with the GPU's name and the core count.
+  - The status reports the device llama.cpp really uses, from its messages while loading (the WebGPU adapter, at the log level, and
+    the layers offloaded, at the debug level): without an adapter in wllama's worker it computes on the CPU, and `auto` then does not
+    count the GPU's measurement. On the CPU, `configure { threads }` sets wllama's `n_threads` (the panel offers powers of two up to the logical cores).
+  - Speeds in the panel: the pieces of text received (one token each, from either engine) over the time since the first;
+    for page translation the background divides each batch's tokens by its time from `started` to `done`.
+    The background also reports the tabs whose page translation runs (`pages`), so the panel's page button stops the active tab's.
+  - On WebGPU, 0.8B and 2B differ little in speed (12.2 and 14.5 ms per token): a fixed cost per token dominates, the 600–900
+    dispatches of the graph each crossing to the GPU process and the logits read back before the next token, while native code
+    reads them from mapped memory in microseconds. Decoding several sequences at once would share that cost (later work).
   - Measured with 2B Q4_K_M: Radeon 8060S 48 tok/s, Radeon RX 9070 XT 67 (native Vulkan 246), CPU of a Ryzen 9 9950X 18 (native 20);
     prompts on the CPU at about 33 tok/s (native 250). Chrome uses the GPU Windows assigns to it: on a PC whose display runs on the
     integrated GPU, the graphics settings must give Chrome the discrete one.
