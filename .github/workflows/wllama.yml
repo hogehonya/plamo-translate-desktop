@@ -5,7 +5,9 @@ name: wllama
 #
 # A stopgap: the npm releases of wllama (3.8.1 so far) bundle a llama.cpp that predates the
 # PLaMo 3 tokenizer. Once a release bundles a newer one, vendor that release instead. The
-# patches in patches/wllama are applied first (see each for why).
+# patches in patches/wllama are applied first (see each for why). A release without the
+# cache_ram_mib parameter (cache-ram.patch) would ignore it silently, and its prompt cache would
+# again outgrow WebAssembly's memory: keep building from source until wllama has it.
 
 on:
   workflow_dispatch:
