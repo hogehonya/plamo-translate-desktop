@@ -1,0 +1,57 @@
+name: wllama
+
+# Builds wllama (llama.cpp compiled to WebAssembly) from source for the extension's in-browser
+# engine, as an artifact to commit under extension/vendor/wllama (see its README.md).
+#
+# A stopgap: the npm releases of wllama (3.8.1 so far) bundle a llama.cpp that predates the
+# PLaMo 3 tokenizer. Once a release bundles a newer one, vendor that release instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: wllama commit to build
+        default: c10c21114984e37fe6ba4edbba446c28c5b7a954
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build wllama
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ngxson/wllama
+          ref: ${{ inputs.ref }}
+          path: wllama
+          submodules: recursive
+          persist-credentials: false
+
+      # wllama's own build: Emscripten in Docker, with the WebGPU backend. The compatibility
+      # build (without Memory64 and JSPI, for Firefox and Safari) is not needed.
+      - name: Build the wasm
+        run: SKIP_COMPAT=1 wllama/scripts/build_wasm.sh
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Build the library
+        working-directory: wllama
+        run: |
+          npm ci --include=dev
+          npm run build:worker
+          npm run build:tsup
+          ./scripts/post_build.sh
+
+      - name: Vendor
+        run: scripts/vendor-wllama.sh wllama extension/vendor/wllama
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wllama
+          path: extension/vendor/wllama
