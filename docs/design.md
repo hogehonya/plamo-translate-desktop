@@ -474,8 +474,10 @@ instead of being overwritten.
     - llama.cpp 0.8.0's shaders do not compile on macOS 14 and 15 with BF16 enabled, so the executables set `GGML_METAL_BF16_DISABLE`
       first thing in `main` (`engine::llama::configure_metal`). llama.cpp fixed this after 0.8.0 (#31360), and the PLaMo GGUF files have no BF16 tensors.
     - ggml aborts when the process exits with Metal buffers alive (`ggml_metal_rsets_free`, from a static destructor), so on macOS dropping a
-      `Worker` waits for its thread to free the model, up to 10 s. GPUI keeps a macOS application running without windows by default, so the app
-      sets `QuitMode::LastWindowClosed`, and it adds the menu with Quit (Cmd+Q) that GPUI does not.
+      `Worker` waits for its thread to free the model, up to 10 s. Dropping one also stops a model load or a speed measurement in progress
+      (the load's progress callback returns false, which makes llama.cpp stop and free what it allocated).
+    - GPUI keeps a macOS application running without windows by default, so the app sets `QuitMode::LastWindowClosed`, and it adds the menu
+      with Quit (Cmd+Q) that GPUI does not.
   - The browser extension alone (from v0.4.0, for its in-browser engine): a zip whose folder is the extension itself, as Load unpacked
     takes it (common for extensions outside the stores), with the licenses and the in-browser engine's notices (`scripts/notices.sh extension`);
     the README's section on it is online. The job checks that the manifest's version is the workspace's.

@@ -11,7 +11,7 @@
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -166,35 +166,28 @@ enum Command {
 
 type EventSink = Arc<dyn Fn(Event) + Send + Sync>;
 
-/// Handle to the inference worker. Dropping it shuts the worker down after the current job.
+/// Handle to the inference worker. Dropping it stops the current job, a model load or a
+/// measurement included, and shuts the worker down.
 pub struct Worker {
     commands: mpsc::Sender<Command>,
     /// The newest job id. Any job with a different id is cancelled or skipped.
     latest: Arc<AtomicU64>,
-    /// Waited for on drop (see the `Drop` implementation).
+    /// Set when the handle is dropped: stops a model load or a measurement in progress, which
+    /// job ids do not reach.
+    closing: Arc<AtomicBool>,
+    /// Waited for on drop (see [`Worker::wait_for_thread`]).
     #[cfg(target_os = "macos")]
     thread: Option<thread::JoinHandle<()>>,
 }
 
-/// ggml's Metal backend asserts when the process exits that all its buffers were freed, and aborts
-/// otherwise (`ggml_metal_rsets_free`). The worker frees them on its own thread once the command
-/// channel closes, so let it finish before the process can exit.
-#[cfg(target_os = "macos")]
 impl Drop for Worker {
     fn drop(&mut self) {
-        // Enough to finish the current token and free the model. Loading cannot be interrupted, so
-        // quitting during a very slow load can still end in that abort.
-        const LIMIT: Duration = Duration::from_secs(10);
+        self.closing.store(true, Ordering::SeqCst);
         self.cancel();
-        // Replacing the only sender closes the channel.
+        // Replacing the only sender closes the channel: the thread frees the model and exits.
         self.commands = mpsc::channel().0;
-        let Some(thread) = self.thread.take() else {
-            return;
-        };
-        let start = std::time::Instant::now();
-        while !thread.is_finished() && start.elapsed() < LIMIT {
-            thread::sleep(Duration::from_millis(5));
-        }
+        #[cfg(target_os = "macos")]
+        self.wait_for_thread();
     }
 }
 
@@ -203,13 +196,14 @@ impl Worker {
         let (commands, rx) = mpsc::channel();
         let latest = Arc::new(AtomicU64::new(0));
         let events: EventSink = Arc::new(events);
-        let thread_latest = latest.clone();
+        let closing = Arc::new(AtomicBool::new(false));
+        let (thread_latest, thread_closing) = (latest.clone(), closing.clone());
         let thread = thread::Builder::new()
             .name("inference".into())
             .spawn(move || {
                 let report = events.clone();
                 let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    run(options, rx, events, thread_latest)
+                    run(options, rx, events, thread_latest, thread_closing)
                 }));
                 // Without this the UI would wait for the dead thread forever.
                 if let Err(payload) = result {
@@ -227,8 +221,26 @@ impl Worker {
         Self {
             commands,
             latest,
+            closing,
             #[cfg(target_os = "macos")]
             thread: Some(thread),
+        }
+    }
+
+    /// ggml's Metal backend asserts when the process exits that all its buffers were freed, and
+    /// aborts otherwise (`ggml_metal_rsets_free`, from a static destructor). The thread frees them
+    /// once the command channel closes, so let it finish before the process can exit.
+    #[cfg(target_os = "macos")]
+    fn wait_for_thread(&mut self) {
+        // Enough to finish the current token, or to stop a load or a measurement, and free the
+        // model.
+        const LIMIT: Duration = Duration::from_secs(10);
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        let start = std::time::Instant::now();
+        while !thread.is_finished() && start.elapsed() < LIMIT {
+            thread::sleep(Duration::from_millis(5));
         }
     }
 
@@ -302,6 +314,7 @@ fn run(
     commands: mpsc::Receiver<Command>,
     events: EventSink,
     latest: Arc<AtomicU64>,
+    closing: Arc<AtomicBool>,
 ) {
     let runtime = match Runtime::init(options) {
         Ok(r) => r,
@@ -319,7 +332,7 @@ fn run(
         };
         match command {
             Command::Load(request) => {
-                if let Some(model) = load(&runtime, &request, &events) {
+                if let Some(model) = load(&runtime, &request, &events, &closing) {
                     // Serve requests until the next load or unload.
                     next = serve(&runtime, &model, &request, &commands, &events, &latest);
                     drop(model);
@@ -328,9 +341,9 @@ fn run(
                     }
                 }
             }
-            Command::Measure(request) => {
-                events(Event::Measured(measure(&runtime, &request, &events)))
-            }
+            Command::Measure(request) => events(Event::Measured(measure(
+                &runtime, &request, &events, &closing,
+            ))),
             Command::Unload => events(Event::Unloaded),
             Command::Translate { job, .. } | Command::TranslateSegments { job, .. } => {
                 events(Event::Failed {
@@ -342,11 +355,18 @@ fn run(
     }
 }
 
-fn load(runtime: &Runtime, request: &LoadRequest, events: &EventSink) -> Option<Model> {
+fn load(
+    runtime: &Runtime,
+    request: &LoadRequest,
+    events: &EventSink,
+    closing: &Arc<AtomicBool>,
+) -> Option<Model> {
     let progress_events = events.clone();
+    let closing = closing.clone();
     let result = runtime.load_model(&request.path, &request.model, move |p| {
         progress_events(Event::LoadProgress(p));
-        true
+        // Returning false makes llama.cpp stop loading and free what it allocated.
+        !closing.load(Ordering::SeqCst)
     });
     match result {
         Ok(model) => Some(model),
@@ -483,18 +503,25 @@ const MEASURE_TEXT: &str = "The meeting has been moved to next Monday afternoon.
 members of the team know, and bring the revised budget and the schedule for the spring release \
 with you, so that we can agree on the priorities before the end of the month.";
 
-/// Measures each device of `request` (see [`Worker::measure`]).
-fn measure(runtime: &Runtime, request: &MeasureRequest, events: &EventSink) -> Vec<Measurement> {
+/// Measures each device of `request` (see [`Worker::measure`]). Stops early when the worker is
+/// closing.
+fn measure(
+    runtime: &Runtime,
+    request: &MeasureRequest,
+    events: &EventSink,
+    closing: &Arc<AtomicBool>,
+) -> Vec<Measurement> {
     let count = request.devices.len();
     request
         .devices
         .iter()
         .enumerate()
+        .take_while(|_| !closing.load(Ordering::SeqCst))
         .map(|(index, &device)| {
             events(Event::Measuring { index, count });
             Measurement {
                 device,
-                result: measure_device(runtime, &request.path, device),
+                result: measure_device(runtime, &request.path, device, closing),
             }
         })
         .collect()
@@ -504,6 +531,7 @@ fn measure_device(
     runtime: &Runtime,
     path: &std::path::Path,
     device: Option<usize>,
+    closing: &Arc<AtomicBool>,
 ) -> Result<Speed, String> {
     let options = ModelOptions {
         gpu: device.map(|device| GpuOffload {
@@ -511,8 +539,11 @@ fn measure_device(
             layers: None,
         }),
     };
+    let load_closing = closing.clone();
     let model = runtime
-        .load_model(path, &options, |_| true)
+        .load_model(path, &options, move |_| {
+            !load_closing.load(Ordering::SeqCst)
+        })
         .map_err(|e| e.to_string())?;
     // A short context is enough for the text and is quicker to set up.
     let session_options = SessionOptions {
@@ -533,7 +564,7 @@ fn measure_device(
             MEASURE_TEXT,
             &mut |_| {},
             &mut |_| {},
-            &|| false,
+            &|| closing.load(Ordering::SeqCst),
         )
         .map_err(|e| e.to_string())
     };
