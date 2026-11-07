@@ -2,7 +2,7 @@
 
 All notable changes to PLaMo Translate Desktop. Each release's section here also becomes its release notes on GitHub.
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-11-07
 
 ### Added
 

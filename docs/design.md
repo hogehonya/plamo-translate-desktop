@@ -635,13 +635,13 @@ Done for v0.1.0: feasibility (M0), the two-pane MVP (M1), model management (M2),
 translation options and long texts (M4), and distribution (M5: Release workflow, icon, third-party notices, desktop entry).
 Then v0.2.0 (2026-11-06): the browser extension (§12); v0.2.1: clearer failures of page translation from the panel.
 v0.3.0: Intel NPUs through OpenVINO, and automatic device selection that measures the devices (§8).
-Towards v0.4.0: the extension's in-browser engine (§12).
+v0.4.0 (2026-11-07): the extension's in-browser engine (§12), the macOS package (Apple Silicon), and the extension alone as a package.
 
 Possible later work:
 
 - Reuse the KV cache prefix between chunks (each request starts from an empty cache today).
 - Partial GPU offload for models larger than the GPU memory.
-- An AppImage or distribution packages for Linux; signing the Windows executable.
+- An AppImage or distribution packages for Linux; signing the Windows executable; notarizing the macOS app.
 - A global hotkey that translates the clipboard.
 - Remote inference backends (§1).
 
