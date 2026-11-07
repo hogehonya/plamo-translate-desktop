@@ -24,6 +24,27 @@ use crate::repetition::LoopDetector;
 use crate::utf8::Utf8Stream;
 use crate::{EngineError, Generation, Result, StopReason, TranslateStats, TranslationBackend};
 
+/// Works around llama.cpp 0.8.0's Metal shaders, which do not compile on macOS 14 and 15: their
+/// Metal compilers reject a `constexpr` in the BF16 code, and then the GPU cannot be used at all.
+/// That code is compiled only with BF16 enabled, and the PLaMo GGUF files have no BF16 tensors.
+/// llama.cpp fixed it after 0.8.0 (#31360); remove this once llama-cpp-rs ships the fix. A value
+/// set beforehand is kept.
+///
+/// # Safety
+///
+/// Sets an environment variable, which the Metal backend reads when it starts: call this first
+/// thing in `main`, while no other thread exists.
+pub unsafe fn configure_metal() {
+    #[cfg(target_os = "macos")]
+    {
+        const BF16_DISABLE: &str = "GGML_METAL_BF16_DISABLE";
+        if std::env::var_os(BF16_DISABLE).is_none() {
+            // SAFETY: the caller guarantees that no other thread exists.
+            unsafe { std::env::set_var(BF16_DISABLE, "1") };
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeOptions {
     /// Forward llama.cpp logs to `tracing` instead of discarding them.
@@ -118,8 +139,10 @@ impl Runtime {
                 .with_n_gpu_layers(layers.unwrap_or(u32::MAX))
                 // With every layer on the GPU, a memory-mapped file would keep a second copy of
                 // the weights in the process's memory for as long as the model is loaded. Read
-                // it instead, so the host copy is freed once the weights are uploaded.
-                .with_use_mmap(layers.is_some()),
+                // it instead, so the host copy is freed once the weights are uploaded. Metal on
+                // Apple silicon is the exception: with unified memory the GPU uses the mapped
+                // pages themselves, and reading would put the weights in the process's own memory.
+                .with_use_mmap(layers.is_some() || cfg!(target_os = "macos")),
             // No devices at all: by default llama.cpp also gives every GPU-type device large
             // operations of a CPU model (op offload), which would use a GPU the user chose not
             // to use, or the placeholder OpenVINO registers without an NPU, which fails.

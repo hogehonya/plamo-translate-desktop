@@ -23,7 +23,7 @@ locally on your computer. It works offline once a model is downloaded. Written i
 - Light and dark themes. The default follows the OS; Settings can fix either one.
 - The source and the translation scroll together, and moving the caret in one selects the corresponding paragraph in the other (can be turned off in Settings).
 
-Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation.
+Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation. On macOS these are `Cmd+Enter` and `Cmd+Shift+C`.
 
 ## Models and their license
 

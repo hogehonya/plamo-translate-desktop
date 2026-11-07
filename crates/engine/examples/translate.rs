@@ -122,6 +122,8 @@ fn parse_args() -> anyhow::Result<Args> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // SAFETY: first thing in main, before any thread starts.
+    unsafe { engine::llama::configure_metal() };
     let args = parse_args()?;
     if args.verbose {
         tracing_subscriber::fmt()

@@ -31,7 +31,10 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     // SAFETY: first thing in main, before any thread starts.
-    unsafe { appdata::devices::configure_openvino() };
+    unsafe {
+        appdata::devices::configure_openvino();
+        engine::llama::configure_metal();
+    }
     if std::env::args().any(|arg| arg == "--check") {
         std::process::exit(check());
     }

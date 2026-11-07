@@ -32,9 +32,30 @@ fn custom_model() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// What a macOS application has to set up itself: GPUI adds no menu bar and no Cmd+Q.
+#[cfg(target_os = "macos")]
+mod macos {
+    use gpui_kit::*;
+
+    actions!(plamo_translate, [Quit]);
+
+    pub fn init(cx: &mut App) {
+        cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.set_menus(vec![Menu {
+            name: "PLaMo Translate".into(),
+            items: vec![MenuItem::action("Quit PLaMo Translate", Quit)],
+            disabled: false,
+        }]);
+    }
+}
+
 fn main() {
     // SAFETY: first thing in main, before any thread starts.
-    unsafe { appdata::devices::configure_openvino() };
+    unsafe {
+        appdata::devices::configure_openvino();
+        engine::llama::configure_metal();
+    }
     let custom_model = custom_model();
     applog::init(&settings::log_path());
     // The release build has no console on Windows: a panic is recorded in the log, then handled
@@ -62,9 +83,14 @@ fn main() {
 
     gpui_kit::application()
         .with_assets(assets::AppAssets)
+        // The default on macOS keeps the process running without a window, which cannot be
+        // reopened here. Windows and Linux already quit with the last window.
+        .with_quit_mode(QuitMode::LastWindowClosed)
         .run(move |cx| {
             gpui_kit::init(cx);
             view::bind_keys(cx);
+            #[cfg(target_os = "macos")]
+            macos::init(cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,

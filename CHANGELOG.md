@@ -8,6 +8,9 @@ All notable changes to PLaMo Translate Desktop. Each release's section here also
 
 - macOS (Apple Silicon) support. `scripts/package-macos.sh` builds the package: the app in a disk image, for macOS 13.3 or later. llama.cpp runs on the GPU through Metal. The Releases page has it as `…-macos-arm64.dmg`. It is not notarized: the README says how to open it.
   - **Connect** registers the browser host with Chrome, Chromium, Edge, and Brave in `~/Library/Application Support`. It used to write to `~/.config`, where only their Linux versions look.
+  - The GPU is used on macOS 14 and 15 as well, where llama.cpp 0.8.0's Metal shaders do not compile with BF16 enabled (the PLaMo models do not use BF16).
+  - The app has a menu with Quit (Cmd+Q) and quits when its window is closed. Quitting while a model is loaded exits cleanly, in the app and in the browser host.
+  - Models on the GPU stay memory-mapped, since Metal uses the mapped file directly: with 0.8B, a peak of about 200 MB of memory instead of 760 MB, at the same speed.
 - The browser extension translates on its own too, with the model running in the browser: [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to WebAssembly) on the CPU or the GPU (WebGPU). The app is not needed for it. See "Without the app" in the README.
   - **Engine** under Settings in the panel: Automatic (the app when it is connected, otherwise the browser), PLaMo Translate Desktop, or In the browser.
   - The 0.8B and 2B models (Q4_K_M), downloaded into the browser from the panel after accepting the PLaMo Community License (resumed after a network error, and deletable). The larger ones do not fit in WebAssembly's memory.

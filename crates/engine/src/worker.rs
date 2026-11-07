@@ -171,6 +171,31 @@ pub struct Worker {
     commands: mpsc::Sender<Command>,
     /// The newest job id. Any job with a different id is cancelled or skipped.
     latest: Arc<AtomicU64>,
+    /// Waited for on drop (see the `Drop` implementation).
+    #[cfg(target_os = "macos")]
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+/// ggml's Metal backend asserts when the process exits that all its buffers were freed, and aborts
+/// otherwise (`ggml_metal_rsets_free`). The worker frees them on its own thread once the command
+/// channel closes, so let it finish before the process can exit.
+#[cfg(target_os = "macos")]
+impl Drop for Worker {
+    fn drop(&mut self) {
+        // Enough to finish the current token and free the model. Loading cannot be interrupted, so
+        // quitting during a very slow load can still end in that abort.
+        const LIMIT: Duration = Duration::from_secs(10);
+        self.cancel();
+        // Replacing the only sender closes the channel.
+        self.commands = mpsc::channel().0;
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        let start = std::time::Instant::now();
+        while !thread.is_finished() && start.elapsed() < LIMIT {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 impl Worker {
@@ -179,7 +204,7 @@ impl Worker {
         let latest = Arc::new(AtomicU64::new(0));
         let events: EventSink = Arc::new(events);
         let thread_latest = latest.clone();
-        thread::Builder::new()
+        let thread = thread::Builder::new()
             .name("inference".into())
             .spawn(move || {
                 let report = events.clone();
@@ -197,7 +222,14 @@ impl Worker {
                 }
             })
             .expect("failed to spawn the inference thread");
-        Self { commands, latest }
+        #[cfg(not(target_os = "macos"))]
+        drop(thread);
+        Self {
+            commands,
+            latest,
+            #[cfg(target_os = "macos")]
+            thread: Some(thread),
+        }
     }
 
     /// Loads a model, replacing the current one. Cancels any running job.
