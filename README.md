@@ -7,6 +7,13 @@ locally on your computer. It works offline once a model is downloaded. Written i
 
 **Built with PLaMo.**
 
+## Firefox Android fork
+
+This fork adds an experimental Firefox package with a full-tab translation UI and
+local, single-thread CPU inference. The Chromium package keeps its existing behavior.
+Build, installation, test results and remaining Android verification are described in
+[Firefox Android](docs/firefox-android.md). The package is unsigned; it is not an AMO release.
+
 ## Features
 
 - Translation between 53 languages. The default target is "Japanese ⇄ English (auto)".

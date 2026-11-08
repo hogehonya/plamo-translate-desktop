@@ -14,7 +14,8 @@
 //   while the host's connection is open; the in-browser engine sends `keepalive` messages.
 // - The context menus and page.js show texts in the display language chosen in the panel.
 
-importScripts("i18n.js");
+if (typeof importScripts === "function") importScripts("i18n.js");
+const FIREFOX = !!chrome.runtime.getManifest().browser_specific_settings?.gecko;
 
 const HOST = "com.github.tanakh.plamo_translate";
 const IDLE_MS = 5 * 60 * 1000;
@@ -79,6 +80,7 @@ const pages = new Map();
 
 /** The panel's engine setting: `auto`, `app`, or `browser`. */
 async function engineSetting() {
+  if (FIREFOX) return "browser";
   const { engine } = await chrome.storage.local.get({ engine: "auto" }).catch(() => ({ engine: "auto" }));
   return engine;
 }
@@ -114,7 +116,25 @@ function probeApp() {
 }
 
 /** Opens the in-browser engine's document and waits for it to connect. */
-async function openEngine() {
+async function openEngine(connection = {}) {
+  if (FIREFOX) {
+    return new Promise((resolve, reject) => {
+      const frame = document.createElement("iframe");
+      const connected = (port) => { clearTimeout(timer); resolve(port); };
+      const close = (reason) => {
+        clearTimeout(timer);
+        if (engineConnected === connected) engineConnected = null;
+        frame.remove();
+        reject(new Error(reason));
+      };
+      const timer = setTimeout(() => close("Translation engine did not start"), 15000);
+      connection.closeEngine = () => close("Translation engine released");
+      engineConnected = connected;
+      frame.hidden = true;
+      frame.src = chrome.runtime.getURL("engine.html");
+      document.body.append(frame);
+    });
+  }
   // Left over from a service worker that stopped: its model belongs to no connection.
   if ((await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] })).length) {
     await chrome.offscreen.closeDocument();
@@ -133,8 +153,9 @@ function connectHost() {
   host = connection;
   hostReady = (async () => {
     const kind = await chooseEngine();
-    const port = kind === "browser" ? await openEngine() : chrome.runtime.connectNative(HOST);
+    if (host !== connection) return;
     connection.kind = kind;
+    const port = kind === "browser" ? await openEngine(connection) : chrome.runtime.connectNative(HOST);
     connection.port = port;
     if (host !== connection) {
       closeConnection(connection);
@@ -146,6 +167,7 @@ function connectHost() {
       const error = chrome.runtime.lastError?.message ?? "";
       if (connection.kind === "app") appAvailable = undefined;
       if (host !== connection) return;
+      connection.closeEngine?.();
       host = null;
       clearTimeout(idleTimer);
       endDownloads(error || "disconnected");
@@ -177,7 +199,11 @@ function connectHost() {
 /** Ends a connection from this side, which fires no onDisconnect. */
 function closeConnection(connection) {
   connection.port?.disconnect();
-  if (connection.kind === "browser") chrome.offscreen.closeDocument().catch(() => {});
+  if (connection.kind === "browser") {
+    if (FIREFOX) {
+      connection.closeEngine?.();
+    } else chrome.offscreen.closeDocument().catch(() => {});
+  }
 }
 
 /** Sends `message` after `configure`, connecting first if needed; messages keep their order. */
@@ -676,13 +702,13 @@ chrome.storage.local.onChanged.addListener((changes) => {
   if (changes.parallelPages) parallelPages = changes.parallelPages.newValue !== false;
   if (!changes.uiLanguage) return;
   languageReady = loadUiLanguage().then(() => {
-    for (const { id, message } of MENUS) chrome.contextMenus.update(id, { title: t(message) }).catch(() => {});
+    for (const { id, message } of MENUS) chrome.contextMenus?.update(id, { title: t(message) }).catch(() => {});
   });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   languageReady.then(() => {
-    for (const { id, message, contexts } of MENUS) chrome.contextMenus.create({ id, title: t(message), contexts });
+    for (const { id, message, contexts } of MENUS) chrome.contextMenus?.create({ id, title: t(message), contexts });
   });
 });
 
@@ -692,16 +718,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+async function openPanel(tab) {
+  if (FIREFOX) {
+    const url = new URL(chrome.runtime.getURL("panel.html"));
+    if (Number.isInteger(tab?.id)) url.searchParams.set("sourceTab", String(tab.id));
+    await chrome.tabs.create({ url: url.href });
+  } else {
+    await chrome.sidePanel.open({ windowId: tab.windowId });
+  }
+}
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+if (FIREFOX) chrome.action.onClicked.addListener(openPanel);
+else chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+chrome.contextMenus?.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_PAGE && tab?.id != null) {
     translatePage(tab.id).catch(() => {});
     return;
   }
   if (info.menuItemId !== MENU_SELECTION || !info.selectionText) return;
   // Must be called while handling the click, before anything asynchronous.
-  chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+  openPanel(tab).catch(() => {});
   // The panel picks this up when it opens, or right away if it is open already.
   chrome.storage.session.set({ request: { text: info.selectionText, at: Date.now() } });
 });

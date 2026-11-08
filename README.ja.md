@@ -234,3 +234,10 @@ PLaMo のモデルはこのリポジトリに含まれず、PLaMo コミュニ�
 配布物にはサードパーティーのソフトウェアが含まれます。アプリの Rust のクレート、llama.cpp、Lucide のアイコン、ブラウザ拡張の wllama
 （Emscripten と Dawn でビルドしたもの）、Windows 版では Visual C++ ランタイム、Intel NPU 版では OpenVINO、oneTBB、OpenCL ローダーです。
 それらのライセンスは、各配布物の `THIRD-PARTY-NOTICES.txt` にあります（`scripts/notices.sh` で生成。拡張機能だけの配布物には、ブラウザ内エンジンの分だけ）。
+
+## このフォークのFirefox Android対応
+
+Firefox向けに、通常タブの翻訳画面とCPU単一スレッド推論を追加しています。
+Chrome / Edge向けの動作は維持します。ビルド・導入・検証結果・残る実機確認は
+[Firefox Android対応](docs/firefox-android.md)を参照してください。
+未署名の開発版であり、AMO公開版ではありません。

@@ -650,5 +650,7 @@
   "pageNearbyHint": {
     "message": "続きはスクロールに合わせて訳します。",
     "description": "Explanation under the near-the-view setting"
-  }
+  },
+  "sourcePlaceholderFirefox": {"message": "翻訳する文章を入力または貼り付けてください。ページを翻訳する場合は、そのページの拡張機能メニューからPLaMoを開いてください。"},
+  "settingsHintFirefox": {"message": "Firefox内で翻訳します。まず0.8Bモデルをお試しください。翻訳中はFirefoxを前面で使用してください。"}
 }
