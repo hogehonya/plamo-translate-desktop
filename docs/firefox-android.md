@@ -87,12 +87,13 @@ SE_AVOID_STATS=true python3 tests/extension/firefox-smoke.py --accept-model-lice
   `空は青い。今日は太陽が明るい。`に置換されることを実ブラウザで確認。
   テストでは元ページの読み込み完了後に、拡張ボタンと同じactiveTab権限を付与。
 - manifestの最低バージョンは142。最低バージョンそのものとAndroid実機の動作は未確認。
-- Android実機、Mozilla署名、GitHub CI・統合は未完了。デスクトップ版の成功をAndroidの成功とは扱わない。
+- Android実機とMozilla署名は未完了。デスクトップ版の成功をAndroidの成功とは扱わない。
+- GitHub CI・統合の状態と証拠は[PR #2](https://github.com/hogehonya/plamo-translate-desktop/pull/2)で追跡する。
 - 独立レビューは未実施。GitHubを扱えない既存impl経路に対し、ユーザーが親エージェントの直接実装を許可。
 
 ## 作業checkpoint
 
 1. フォーク・Issue作成: 完了。正本はhogehonya/plamo-translate-desktop、Issue #1。
 2. Firefoxパッケージ実装とローカル検証: 完了。短文翻訳・解放と再読み込み・元ページ翻訳まで確認済み。
-3. 実機確認と統合: 未完了。`.20`のUSB端末確認には、r5600xから`.20`への既存SSH認証が必要。
-   `honya@192.168.10.20`は公開鍵提示後に拒否された。認証設定は変更していない。
+3. 統合: ユーザー承認済み。PR #2でCI結果・マージ状態を確認する。
+4. Android実機確認と署名: 未完了。実機への接続準備とMozilla署名が必要。Issue #1を継続する。
