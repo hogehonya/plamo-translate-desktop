@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import vm from 'node:vm';
+const event = () => ({ listeners: [], addListener(fn) { this.listeners.push(fn); } });
+const created = [];
+const runtime = { getURL: p => `moz-extension://test/${p}`, getManifest: () => ({ browser_specific_settings: { gecko: {} } }), onConnect: event(), onInstalled: event(), onMessage: event() };
+const storageArea = { get: async defaults => defaults, set: async () => {}, onChanged: event() };
+const chrome = { runtime, storage: { local: storageArea, session: storageArea }, action: { onClicked: event() }, tabs: { create: async options => { created.push(options); return { id: 100 }; } } };
+let iframe;
+const context = vm.createContext({ chrome, URL, setTimeout, clearTimeout, console, loadUiLanguage: async () => {}, t: key => key, document: { createElement: () => ({ remove() { this.removed = true; } }), body: { append(node) { iframe = node; } } } });
+vm.runInContext(await fs.readFile('extension/background.js', 'utf8'), context);
+assert.equal(chrome.action.onClicked.listeners.length, 1, 'Firefox toolbar listener is registered without contextMenus/sidePanel');
+await chrome.action.onClicked.listeners[0]({ id: 42 });
+assert.equal(new URL(created[0].url).searchParams.get('sourceTab'), '42', 'panel retains original page ID');
+assert.equal(await vm.runInContext('chooseEngine()', context), 'browser', 'Firefox never probes native messaging');
+vm.runInContext('var testConnection = {kind: "browser"}', context);
+const pending = vm.runInContext('openEngine(testConnection)', context);
+assert.equal(iframe.src, runtime.getURL('engine.html'));
+const fake = { name: 'engine', sender: { url: runtime.getURL('engine.html'), tab: { id: 1 } }, disconnect() { this.closed = true; } };
+runtime.onConnect.listeners[0](fake);
+assert.equal(fake.closed, true, 'a tab cannot impersonate the hidden engine');
+const engine = { name: 'engine', sender: { url: runtime.getURL('engine.html') }, disconnect() {} };
+runtime.onConnect.listeners[0](engine);
+assert.equal(await pending, engine);
+vm.runInContext('closeConnection(testConnection)', context);
+assert.equal(iframe.removed, true, 'release removes engine document');
+console.log('Firefox startup, source-tab routing, engine isolation and release: passed');
+
+const cancelled = vm.runInContext('openEngine(testConnection)', context);
+vm.runInContext('closeConnection(testConnection)', context);
+await assert.rejects(cancelled, /released/);
+assert.equal(iframe.removed, true, 'release during startup cleans up immediately');
+const restarted = vm.runInContext('openEngine(testConnection)', context);
+runtime.onConnect.listeners[0](engine);
+assert.equal(await restarted, engine, 'restart after cancelled initialization works');
+vm.runInContext('closeConnection(testConnection)', context);
+
+// The shared background still initializes as a Chromium service worker.
+let imported = false;
+let panelBehavior = false;
+const chromiumRuntime = { ...runtime, getManifest: () => ({}), onInstalled: event(), onConnect: event(), onMessage: event() };
+const chromium = { ...chrome, runtime: chromiumRuntime, contextMenus: { onClicked: event() }, sidePanel: { setPanelBehavior: async options => { panelBehavior = options.openPanelOnActionClick; } } };
+const worker = vm.createContext({ chrome: chromium, URL, console, setTimeout, clearTimeout, importScripts: file => { assert.equal(file, 'i18n.js'); imported = true; }, loadUiLanguage: async () => {}, t: key => key });
+vm.runInContext(await fs.readFile('extension/background.js', 'utf8'), worker);
+assert.equal(imported, true);
+assert.equal(panelBehavior, true);
+assert.equal(await vm.runInContext('engineSetting()', worker), 'auto');
+console.log('Chromium service worker startup and automatic engine selection: passed');

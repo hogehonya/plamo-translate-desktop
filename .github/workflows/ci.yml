@@ -76,3 +76,12 @@ jobs:
       # The syntax of every script (Node recognizes the ES modules), then the tests.
       - run: for f in extension/*.js; do node --check "$f"; done
       - run: node tests/extension/translator.test.mjs
+      - run: node tests/extension/firefox.test.mjs
+      - run: node tests/extension/model-storage.test.mjs
+      - run: python3 scripts/package-firefox.py
+      - run: for package in dist/*-firefox-unsigned.zip; do python3 -m zipfile -e "$package" dist/firefox; done
+      - run: npx --yes web-ext@10.8.0 lint --source-dir dist/firefox
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firefox-unsigned
+          path: dist/*-firefox-unsigned.zip

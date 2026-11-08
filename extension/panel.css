@@ -106,3 +106,11 @@ body > .output {
 .notice { font-size: 13px; border-left: 3px solid var(--error); padding: 4px 8px; }
 .notice code { font-size: 12px; }
 footer { font-size: 11px; color: var(--muted); text-align: right; }
+
+/* A full-page touch UI for Firefox Android; the Chromium sidebar keeps its sizing. */
+.firefox body { font-family: "IBM Plex Sans JP", system-ui, sans-serif; height: 100dvh; }
+.firefox button, .firefox select, .firefox summary { min-height: 44px; }
+@media (max-width: 480px) {
+  .firefox .browser-models { margin-left: 0; }
+  .firefox .model-row { flex-wrap: wrap; }
+}

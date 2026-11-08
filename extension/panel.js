@@ -14,14 +14,17 @@ const TARGETS = [
 ];
 const STYLES = ["", "polite", "plain"];
 const PAGE_MODES = ["replace", "below"];
-const ENGINES = ["auto", "app", "browser"];
+const FIREFOX = !!chrome.runtime.getManifest().browser_specific_settings?.gecko;
+const ENGINES = FIREFOX ? ["browser"] : ["auto", "app", "browser"];
+const sourceParam = new URL(location.href).searchParams.get("sourceTab");
+const sourceTabId = sourceParam !== null && /^\d+$/.test(sourceParam) ? Number(sourceParam) : null;
 
 const $ = (id) => document.getElementById(id);
 const langName = (code) => t(`lang_${code.replaceAll("-", "_").replace("(easy)", "_easy")}`);
 
 let port = null;
 /** The engine in use, from its status and options: `app` or `browser`. */
-let engine = "app";
+let engine = FIREFOX ? "browser" : "app";
 /** The engine the automatic setting uses (`app` or `browser`), or null when another is set. */
 let autoEngine = null;
 /** Whether the in-browser engine is measuring its devices for the button. */
@@ -53,6 +56,10 @@ let progress = () => "";
 let notice = null;
 
 $("output").append(outputNode);
+if (FIREFOX) {
+  document.documentElement.classList.add("firefox");
+  $("source").dataset.i18nPlaceholder = "sourcePlaceholderFirefox";
+}
 
 // ---- Settings ----
 
@@ -72,7 +79,7 @@ $("engine").addEventListener("change", () => {
 });
 // Applied here as in panels of other windows (and in the background, for its menus).
 chrome.storage.local.onChanged.addListener(async (changes) => {
-  if (changes.engine) $("engine").value = changes.engine.newValue ?? "auto";
+  if (changes.engine) $("engine").value = FIREFOX ? "browser" : (changes.engine.newValue ?? "auto");
   if (!changes.uiLanguage) return;
   const uiLanguage = await loadUiLanguage();
   applyLanguage();
@@ -92,7 +99,7 @@ for (const id of ["model", "device", "threads"]) {
 
 /** The thread count applies to the in-browser engine on the CPU only, so it shows only then. */
 function updateThreadsVisibility() {
-  $("threadsRow").hidden = !(engine === "browser" && $("device").value === "cpu");
+  $("threadsRow").hidden = FIREFOX || !(engine === "browser" && $("device").value === "cpu");
 }
 
 $("measure").addEventListener("click", () => {
@@ -203,17 +210,23 @@ $("translatePage").addEventListener("click", () => {
 /** The active tab of this panel's window, and the tabs whose page translation runs. */
 let activeTabId = null;
 let runningPages = new Set();
+async function targetTab() {
+  if (FIREFOX) return sourceTabId === null ? null : chrome.tabs.get(sourceTabId).catch(() => null);
+  return (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+}
 async function updateActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await targetTab();
   activeTabId = tab?.id ?? null;
   renderPageButton();
 }
 chrome.tabs.onActivated.addListener(updateActiveTab);
+chrome.tabs.onRemoved.addListener(updateActiveTab);
 updateActiveTab();
 
 function renderPageButton() {
   const running = activeTabId !== null && runningPages.has(activeTabId);
   const button = $("translatePage");
+  button.disabled = activeTabId === null;
   button.textContent = t(running ? "stopPage" : "translatePage");
   button.title = t(running ? "stopPageTitle" : "translatePageTitle");
   button.classList.toggle("running", running);
@@ -221,7 +234,7 @@ function renderPageButton() {
 
 async function translatePage() {
   hideNotice();
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await targetTab();
   if (tab?.id != null) send({ type: "translate_page", tabId: tab.id });
 }
 $("copy").addEventListener("click", async () => {
@@ -244,7 +257,7 @@ const ready = Promise.all([
   $("pageMarks").checked = saved.pageMarks;
   $("pageNearby").checked = saved.pageNearby;
   $("parallelPages").checked = saved.parallelPages;
-  $("engine").value = saved.engine;
+  $("engine").value = FIREFOX ? "browser" : saved.engine;
   updateStyleVisibility();
   for (const key of Object.keys(choices)) Object.assign(choices[key], saved[key]);
   licenseAccepted = saved.licenseAccepted;
@@ -414,7 +427,7 @@ async function pageFailed(error) {
   // error pages cannot be entered at all.
   const all = { origins: ["<all_urls>"] };
   const permissionHelps =
-    /must request permission/i.test(error ?? "") && !(await chrome.permissions.contains(all).catch(() => false));
+    /must request permission|Missing host permission|Cannot access contents/i.test(error ?? "") && !(await chrome.permissions.contains(all).catch(() => false));
   if (!permissionHelps) {
     showNotice(() => t("pageCannotTranslate"));
     return;
@@ -575,10 +588,10 @@ function renderBrowserModels() {
 
 /** Texts that depend on the engine in use. */
 function renderEngineTexts() {
-  $("settingsHint").textContent = t(engine === "browser" ? "settingsHintBrowser" : "settingsHint");
+  $("settingsHint").textContent = t(FIREFOX ? "settingsHintFirefox" : (engine === "browser" ? "settingsHintBrowser" : "settingsHint"));
   // The app's host translates one batch at a time anyway.
-  $("parallelRow").hidden = engine !== "browser";
-  $("appGuide").hidden = engine !== "browser";
+  $("parallelRow").hidden = FIREFOX || engine !== "browser";
+  $("appGuide").hidden = FIREFOX || engine !== "browser";
   $("appGuide").href = t("appGuideUrl");
   $("release").title = t(engine === "browser" ? "releaseTitleBrowser" : "releaseTitle");
   $("licenseLink").href = t("licenseUrl");

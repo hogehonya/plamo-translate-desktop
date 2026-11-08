@@ -15,6 +15,9 @@
 // - `segment` carries the segment's generated `tokens`. `keepalive` messages keep the service
 //   worker running (see the end of this file).
 
+import { commitModelFile } from "./model-storage.js";
+const FIREFOX = !!chrome.runtime.getManifest().browser_specific_settings?.gecko;
+
 import { Wllama } from "./vendor/wllama/wllama.js";
 import { History, STOP, estimateTokens, prompt, resolveTarget, split } from "./translator.js";
 
@@ -38,6 +41,7 @@ const MODELS = [
     bytes: 573123200,
   },
 ];
+if (FIREFOX) MODELS.reverse();
 const fileName = (model) => `${model.id}.gguf`;
 const modelUrl = (model) => `https://huggingface.co/${model.repo}/resolve/${model.revision}/${fileName(model)}`;
 
@@ -50,7 +54,7 @@ const HISTORY_TOKENS = 768;
 // costs little more per step than one. Each has its own KV cache of N_CTX: with one cache shared
 // by all (wllama's default), every step attends over all of them, which made concurrent
 // translations several times slower than one alone.
-const SLOTS = 4;
+const SLOTS = FIREFOX ? 1 : 4;
 
 // llama.cpp's WebGPU backend requests an adapter without a power preference, which gets the
 // integrated GPU beside a discrete one. wllama's worker code passes through
@@ -188,7 +192,7 @@ async function download(model) {
     if (existing !== model.bytes) {
       throw new Error(`downloaded ${existing} bytes instead of ${model.bytes}`);
     }
-    await part.move(dir, fileName(model));
+    await commitModelFile(part, dir, fileName(model));
     report({ state: "done", received: existing });
   } catch (e) {
     // Keeps what arrived for the next try.
@@ -217,6 +221,7 @@ async function deleteModel(model) {
 
 /** The WebGPU adapter wllama would get, described, or null without one. */
 async function gpuDescription() {
+  if (FIREFOX) return null;
   const adapter = await navigator.gpu?.requestAdapter({ powerPreference: "high-performance" }).catch(() => null);
   if (!adapter) return null;
   const info = adapter.info ?? {};
@@ -296,7 +301,7 @@ async function load(model, device) {
       // fail). Each batch's requests reuse their own slot's state, which needs no copy.
       cache_ram_mib: 0,
       n_gpu_layers: device === "gpu" ? 999 : 0,
-      ...(settings.threads > 0 ? { n_threads: settings.threads } : {}),
+      ...(FIREFOX ? { n_threads: 1 } : settings.threads > 0 ? { n_threads: settings.threads } : {}),
     });
   } catch (e) {
     await wllama.exit().catch(() => {});
@@ -656,14 +661,14 @@ async function sendOptions() {
     engine: "browser",
     models,
     devices: [
-      { name: "cpu", description: `WebAssembly, ${navigator.hardwareConcurrency} threads`, kind: "cpu" },
+      { name: "cpu", description: `WebAssembly, ${FIREFOX ? 1 : navigator.hardwareConcurrency} threads`, kind: "cpu" },
       ...(gpu ? [{ name: "gpu", description: gpu, kind: "gpu" }] : []),
     ],
     model: settings.model || null,
     device: settings.device || null,
     // The thread counts to choose from go up to the logical cores.
-    cores: navigator.hardwareConcurrency,
-    threads: settings.threads || null,
+    cores: FIREFOX ? 1 : navigator.hardwareConcurrency,
+    threads: FIREFOX ? 1 : settings.threads || null,
     // What `auto` uses (null until measured), and the last measurement.
     auto: autoDevice(gpu),
     measured: gpu ? savedMeasurement(hardwareOf(gpu)) : null,

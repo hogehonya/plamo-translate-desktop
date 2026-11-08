@@ -650,5 +650,7 @@
   "pageNearbyHint": {
     "message": "The rest is translated as you scroll to it.",
     "description": "Explanation under the near-the-view setting"
-  }
+  },
+  "sourcePlaceholderFirefox": {"message": "Type or paste text to translate. To translate a page, open PLaMo from the extension menu on that page."},
+  "settingsHintFirefox": {"message": "Translation runs locally in Firefox. Start with the 0.8B model. Keep Firefox in the foreground during translation."}
 }

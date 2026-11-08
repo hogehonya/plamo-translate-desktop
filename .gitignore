@@ -3,3 +3,6 @@
 /dist
 /cli
 /THIRD-PARTY-NOTICES.txt
+
+# Python verification caches
+__pycache__/

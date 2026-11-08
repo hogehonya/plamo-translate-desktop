@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { commitModelFile } from '../../extension/model-storage.js';
+let removed = false;
+let written = '';
+const part = { name: 'partial', getFile: async () => new Blob(['complete model']) };
+const dir = { getFileHandle: async () => ({ createWritable: async () => new WritableStream({ write: data => { written += new TextDecoder().decode(data); } }) }), removeEntry: async name => { assert.equal(name, 'partial'); removed = true; } };
+await commitModelFile(part, dir, 'model.gguf');
+assert.equal(written, 'complete model');
+assert.equal(removed, true);
+removed = false;
+dir.getFileHandle = async () => ({ createWritable: async () => new WritableStream({ write() { throw Error('disk full'); } }) });
+await assert.rejects(commitModelFile(part, dir, 'model.gguf'), /disk full/);
+assert.equal(removed, false, 'failed copy preserves resumable source');
+let moved = false;
+await commitModelFile({ move: async (directory, name) => { assert.equal(directory, dir); assert.equal(name, 'model.gguf'); moved = true; } }, dir, 'model.gguf');
+assert.equal(moved, true, 'Chrome uses existing atomic move');
+console.log('Model commit: streaming fallback, failed-copy recovery, native move passed');
